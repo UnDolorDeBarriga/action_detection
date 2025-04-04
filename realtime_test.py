@@ -23,7 +23,7 @@ def main():
     print(f"Loaded model labels: {actions}")
 
     # Load model
-    model = load_model('save_model.keras')
+    model = load_model('model/save_model.keras')
 
     # Video capture
     cap = cv2.VideoCapture(0)
