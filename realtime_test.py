@@ -8,21 +8,22 @@ from matplotlib import pyplot as plt
 import time
 import mediapipe as mp
 import csv
+from tensorflow.keras.models import load_model
 
 # Define mediapipe model
 mp_holistic = mp.solutions.holistic
 mp_drawing = mp.solutions.drawing_utils
 DATA_PATH = os.path.join('model/data') 
 VIDEO_LENGTH = 30                               # Number of frames to save for each action
+COLORS = [(245,117,16), (117,245,16), (16,117,245)]
 
 def main():
     # Load actions to detect
     actions = load_model_lables()
     print(f"Loaded model labels: {actions}")
 
-    last_dir = get_last_directory(actions)
-    print(f"Last non-empty directory: {last_dir}")
-
+    # Load model
+    model = load_model('save_model.keras')
 
     # Video capture
     cap = cv2.VideoCapture(0)
@@ -34,16 +35,15 @@ def main():
         min_tracking_confidence=0.5,
     )
 
-    number = -1
-    frame_count = 0
-    save_sequence = False
-    action_num = 0
+    sequence = []
+    sentence = []
+    predictions = []
+    threshold = 0.7
     while True:
         # If ESC (27) is pressed, exit the loop
         key = cv2.waitKey(16)
         if key == 27:
             break
-        number, o_number = select_num(key, number)
         
         # Read frame from camera
         ret, frame = cap.read()
@@ -56,51 +56,41 @@ def main():
         # Draw landmarks
         draw_styled_landmarks(image, results)
 
-        if number != -1 and not save_sequence:
-            # Start a new sequence
-            save_sequence = True
-            frame_count = 0
-            action_num = number 
-            action = actions[number]
-            last_dir[action] += 1
-            # Create directory
-            os.makedirs(os.path.join(DATA_PATH, action, str(last_dir[action])), exist_ok=True)
-
-            # Start colecting
-            cv2.putText(image, 'STARTING COLLECTION', (120,200), 
-                               cv2.FONT_HERSHEY_SIMPLEX, 1, (0,255, 0), 4, cv2.LINE_AA)
-            # Show to screen
-            cv2.imshow('OpenCV Feed', image)
-            cv2.waitKey(500)
-
-
-        else:
-            if save_sequence:
-                image = draw_info(image, action, last_dir[action])
-                # Export keypoints
-                keypoints = extract_keypoints(results)
-                npy_path = os.path.join(DATA_PATH, action, str(last_dir[action]), str(frame_count))
-                np.save(npy_path, keypoints)
-                # Increment frame count
-                frame_count += 1
+        # 2. Prediction logic
+        keypoints = extract_keypoints(results)
+        sequence.append(keypoints)
+        sequence = sequence[-30:]
+        
+        if len(sequence) == 30:
+            res = model.predict(np.expand_dims(sequence, axis=0))[0]
+            print(actions[np.argmax(res)])
+            predictions.append(np.argmax(res))
             
-            if frame_count == VIDEO_LENGTH:
-                save_sequence = False
-                frame_count = 0
-                cv2.putText(image, 'STOP COLECTING {}'.format(action), (120,200), 
-                               cv2.FONT_HERSHEY_SIMPLEX, 1, (0,0, 255), 4, cv2.LINE_AA)
-                
-                print(f"Finished saving sequence for action {action}")
-                cv2.imshow('OpenCV Feed', image)
-                cv2.waitKey(500)
+            
+            #3. Viz logic
+            # if np.unique(predictions[-10:])[0]==np.argmax(res): 
+            if res[np.argmax(res)] > threshold: 
+                if len(sentence) > 0: 
+                    if actions[np.argmax(res)] != sentence[-1]:
+                        sentence.append(actions[np.argmax(res)])
+                else:
+                    sentence.append(actions[np.argmax(res)])
 
-            # Show to screen
-            cv2.imshow('OpenCV Feed', image)
+            if len(sentence) > 5: 
+                sentence = sentence[-5:]
 
+            # Viz probabilities
+            image = prob_viz(res, actions, image)
+            
+        cv2.rectangle(image, (0,0), (640, 40), (245, 117, 16), -1)
+        cv2.putText(image, ' '.join(sentence), (3,30), 
+                    cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2, cv2.LINE_AA)
+        
+        # Show to screen
+        cv2.imshow('OpenCV Feed', image)
 
     cap.release()
     cv2.destroyAllWindows()
-
 
 
 def mediapipe_detection(image, model) -> tuple:
@@ -189,79 +179,22 @@ def extract_keypoints(results) -> np.ndarray:
     rh = np.array([[res.x, res.y, res.z] for res in results.right_hand_landmarks.landmark]).flatten() if results.right_hand_landmarks else np.zeros(21*3)
     return np.concatenate([pose, face, lh, rh])
 
-def select_num(key, number) -> tuple:
+def prob_viz(res, actions, input_frame) -> np.ndarray:
     """
-    Selects a number based on the key pressed.
+    Visualizes the probabilities of the actions.
     Args:
-        key: The key pressed.
-        number: The current number.
+        res: The prediction results.
+        actions: The list of actions.
+        input_frame: The input frame to draw on.
     Returns:
-        number: The selected number.
-        o_number: The original number.
+        output_frame: The processed frame with probabilities drawn.
     """
-    o_number = number
-    number = -1
-    if 48 <= key <= 57:  # 0 ~ 9
-        number = key - 48
-        o_number = number
-    # if 97 <= key <= 122:
-    #     number = key - 87
-    #     o_number = number
-    return number, o_number
-
-def draw_info(image, action, sequence) -> np.ndarray:
-    """
-    Draws information on the image.
-    Args:
-        image: The input image.
-        action: The action name.
-        sequence: The number of the sequence.
-    Returns:
-        image: The processed image with information drawn.
-    """
-    cv2.putText(image, 'Collecting frames for {} Video Number {}'.format(action, sequence), (15,12), 
-                               cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 1, cv2.LINE_AA)
-    return image
-
-def get_last_directory(actions) -> int:
-        """
-        Gets the last non-empty directory for each action.
-        Creates directories for each action if they don't exist.
-        Args:
-            actions: List of action names.
-        Returns:
-            last_dir: Dictionary with action names as keys and last non-empty directory as values.
-        """
-        for action in actions: 
-            os.makedirs(os.path.join(DATA_PATH, action), exist_ok=True)
-        
-        last_dir = {}
-        for action in actions:
-            last_non_empty_dir = None
-            for folder in sorted(os.listdir(os.path.join(DATA_PATH, action)), reverse=True):
-                folder_path = os.path.join(DATA_PATH, action, folder)
-                if os.path.isdir(folder_path) and os.listdir(folder_path):
-                    last_non_empty_dir = folder
-                    last_dir[action] = int(folder)
-                    break
-            if last_non_empty_dir is None:
-                last_dir[action] = -1
-        return last_dir
-
-if __name__ == '__main__':
-    main()
-
-
-
-colors = [(245,117,16), (117,245,16), (16,117,245)]
-def prob_viz(res, actions, input_frame, colors):
     output_frame = input_frame.copy()
     for num, prob in enumerate(res):
-        cv2.rectangle(output_frame, (0,60+num*40), (int(prob*100), 90+num*40), colors[num], -1)
+        cv2.rectangle(output_frame, (0,60+num*40), (int(prob*100), 90+num*40), COLORS[num], -1)
         cv2.putText(output_frame, actions[num], (0, 85+num*40), cv2.FONT_HERSHEY_SIMPLEX, 1, (255,255,255), 2, cv2.LINE_AA)
         
     return output_frame
-
-
-plt.figure(figsize=(18,18))
-plt.imshow(prob_viz(res, actions, image, colors))
+    
+if __name__ == '__main__':
+    main()
