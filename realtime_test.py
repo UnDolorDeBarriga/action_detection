@@ -1,23 +1,30 @@
-from scipy import stats
 import os
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
 
 import cv2
 import numpy as np
 from matplotlib import pyplot as plt
-import time
 import mediapipe as mp
 import csv
 from tensorflow.keras.models import load_model
+import tensorflow as tf
+
+#TODO: 1: Take out face
+#TODO: 2: Only take train data if hands are visisble
+#TODO: 3: Is possible to train with more weight on the hands?
+#TODO: 4: Training data
+#TODO: 5: Improve recognise logic
+#TODO: 6: Send sentence to LLM to build a proper phrase
 
 # Define mediapipe model
 mp_holistic = mp.solutions.holistic
 mp_drawing = mp.solutions.drawing_utils
 DATA_PATH = os.path.join('model/data') 
-VIDEO_LENGTH = 30                               # Number of frames to save for each action
+VIDEO_LENGTH = 25                               # Number of frames to save for each action
 COLORS = [(245,117,16), (117,245,16), (16,117,245)]
 
 def main():
+    config_gpu()
     # Load actions to detect
     actions = load_model_lables()
     print(f"Loaded model labels: {actions}")
@@ -38,7 +45,7 @@ def main():
     sequence = []
     sentence = []
     predictions = []
-    threshold = 0.7
+    threshold = 0.9
     while True:
         # If ESC (27) is pressed, exit the loop
         key = cv2.waitKey(16)
@@ -58,12 +65,15 @@ def main():
 
         # 2. Prediction logic
         keypoints = extract_keypoints(results)
-        sequence.append(keypoints)
-        sequence = sequence[-30:]
+        print(f"RH: {np.all(keypoints[-21*3:])}, LH: {np.all(keypoints[-2*21*3:-21*3])}, Size: {len(sequence)}")
+        if np.all(keypoints[-21*3:]) != 0 or np.all(keypoints[-2*21*3:-21*3]) != 0:
+            sequence.append(keypoints)
+            sequence = sequence[-25:]
         
-        if len(sequence) == 30:
+        if len(sequence) == 25:
             res = model.predict(np.expand_dims(sequence, axis=0))[0]
             print(actions[np.argmax(res)])
+            print(res[np.argmax(res)])
             predictions.append(np.argmax(res))
             
             
@@ -75,7 +85,7 @@ def main():
                         sentence.append(actions[np.argmax(res)])
                 else:
                     sentence.append(actions[np.argmax(res)])
-
+                sequence = []
             if len(sentence) > 5: 
                 sentence = sentence[-5:]
 
@@ -196,5 +206,26 @@ def prob_viz(res, actions, input_frame) -> np.ndarray:
         
     return output_frame
     
+def config_gpu():
+    # --- INIZIO CODICE CONFIGURAZIONE GPU ---
+    gpus = tf.config.list_physical_devices('GPU')
+    if gpus:
+        print(f"Trovate {len(gpus)} GPU fisiche.")
+        try:
+            # Itera su ogni GPU fisica trovata
+            for gpu in gpus:  # <--- Qui viene definita la variabile 'gpu'
+                # Imposta la crescita della memoria per QUESTA specifica gpu
+                tf.config.experimental.set_memory_growth(gpu, True)
+                print(f"  - Memoria dinamica abilitata per: {gpu.name}") # Stampa info utile
+            logical_gpus = tf.config.list_logical_devices('GPU')
+            print(f"Configurate {len(logical_gpus)} GPU logiche.")
+        except RuntimeError as e:
+            # La crescita della memoria deve essere impostata prima dell'inizializzazione!
+            print(f"Errore durante la configurazione della GPU: {e}")
+    else:
+        print("Nessuna GPU fisica trovata da TensorFlow.")
+    # --- FINE CODICE CONFIGURAZIONE GPU --
+
+
 if __name__ == '__main__':
     main()
