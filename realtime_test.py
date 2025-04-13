@@ -6,10 +6,11 @@ import numpy as np
 import mediapipe as mp
 from tensorflow.keras.models import load_model # type: ignore
 import tensorflow as tf
-from main import load_model_lables, extract_keypoints, draw_styled_landmarks, mediapipe_detection, preprocess_landmarks
+from utilities import load_model_lables, extract_keypoints, draw_styled_landmarks, mediapipe_detection, preprocess_landmarks
+from utilities import VIDEO_LENGTH
 
 #TODO: 1: Take out face
-    #Normalization
+    # Normalization
     # Rotations
     # Squeeze
     # Prespective
@@ -24,7 +25,7 @@ from main import load_model_lables, extract_keypoints, draw_styled_landmarks, me
 mp_holistic = mp.solutions.holistic
 mp_drawing = mp.solutions.drawing_utils
 DATA_PATH = os.path.join('model/data') 
-VIDEO_LENGTH = 25                               # Number of frames to save for each action
+                          # Number of frames to save for each action
 COLORS = [(245,117,16), (117,245,16), (16,117,245)]
 
 def main():
@@ -74,17 +75,16 @@ def main():
         # keypoints = extract_keypoints(results)
         keypoints = preprocess_landmarks(results)
 
-
         #TODO: 2
         sequence.append(keypoints)
-        sequence = sequence[-25:]
+        sequence = sequence[-VIDEO_LENGTH:]
         print(f"Sequence length: {len(sequence)}")
         # print(f"RH: {np.all(keypoints[-21*3:])}, LH: {np.all(keypoints[-2*21*3:-21*3])}, Size: {len(sequence)}")
         # if np.all(keypoints[-21*3:]) != 0 or np.all(keypoints[-2*21*3:-21*3]) != 0:
         #     sequence.append(keypoints)
         #     sequence = sequence[-25:]
         
-        if len(sequence) == 25:
+        if len(sequence) == VIDEO_LENGTH:
             res = model.predict(np.expand_dims(sequence, axis=0))[0]
             print(actions[np.argmax(res)])
             print(res[np.argmax(res)])

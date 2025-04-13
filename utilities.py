@@ -13,7 +13,7 @@ import copy
 mp_holistic = mp.solutions.holistic
 mp_drawing = mp.solutions.drawing_utils
 DATA_PATH = os.path.join('model/data') 
-VIDEO_LENGTH = 30                               # Number of frames to save for each action
+VIDEO_LENGTH = 25                               # Number of frames to save for each action
 
 def main():
     # Load actions to detect
@@ -291,6 +291,41 @@ def apply_spatial_augmentations(results, angle_deg, squeeze_w1, squeeze_w2):
     return np.concatenate([pose_arr, lh_arr, rh_arr])
 
 # --- Esempio di utilizzo nel tuo ciclo di processing ---
+def rotate_data(sequences, rotations) -> np.ndarray:
+    pose_length = 99
+    hand_length = 63
+
+    hand_l_start = pose_length
+    hand_l_end = pose_length + hand_length
+    hand_r_start = pose_length + hand_length
+    hand_r_end = pose_length + 2 * hand_length
+
+    rotated_sequences = np.copy(sequences)
+    
+    for i, rot in enumerate(rotations):
+        cos_theta = np.cos(np.radians(rot))
+        sin_theta = np.sin(np.radians(rot))
+        rotation_matrix = np.array([[cos_theta, -sin_theta],
+                                  [sin_theta, cos_theta]])
+        
+        for frame_idx in range(VIDEO_LENGTH):
+            # Extract x, y coordinates for left and right hands
+            hand_l = sequences[i, frame_idx, hand_l_start:hand_l_end].reshape(21, 3)[:, :2]
+            hand_r = sequences[i, frame_idx, hand_r_start:hand_r_end].reshape(21, 3)[:, :2]
+
+            # Rotate left hand
+            rotated_hand_l = np.dot(hand_l, rotation_matrix)
+            rotated_sequences[i, frame_idx, hand_l_start:hand_l_end-1:3] = rotated_hand_l[:, 0]
+            rotated_sequences[i, frame_idx, hand_l_start+1:hand_l_end:3] = rotated_hand_l[:, 1]
+
+            # Rotate right hand
+            rotated_hand_r = np.dot(hand_r, rotation_matrix)
+            rotated_sequences[i, frame_idx, hand_r_start:hand_r_end-1:3] = rotated_hand_r[:, 0]
+            rotated_sequences[i, frame_idx, hand_r_start+1:hand_r_end:3] = rotated_hand_r[:, 1]
+
+    return rotated_sequences
+
+
 
 def normalize_hands_coordinates(kp_hands) -> np.ndarray:
     """
@@ -481,6 +516,7 @@ def preprocess_landmarks(results) -> np.ndarray:
     kp_pose, kp_hands = extract_keypots_cordinates(results)
     norm_hands = normalize_hands_coordinates(kp_hands)
     norm_pose = normalize_pose_coordinates(kp_pose)
+    # print(f"Pose shape: {norm_pose.shape}, Hands shape: {norm_hands.shape}")
     return np.concatenate([norm_pose, norm_hands])
 
 
