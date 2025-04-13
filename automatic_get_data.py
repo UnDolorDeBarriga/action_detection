@@ -15,7 +15,7 @@ DELAY = 0.7
 
 def main():
     # Set up variables
-    no_sequences = 5
+    no_sequences = 15
     sequence_length = 25
 
     # Load actions to detect
