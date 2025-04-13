@@ -10,6 +10,7 @@ from tensorflow.keras.models import load_model
 import tensorflow as tf
 
 #TODO: 1: Take out face
+    # Preprocessing Algo
 #TODO: 2: Only take train data if hands are visisble
 #TODO: 3: Is possible to train with more weight on the hands?
 #TODO: 4: Training data

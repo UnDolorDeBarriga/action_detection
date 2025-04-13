@@ -8,6 +8,7 @@ import time
 import mediapipe as mp
 import csv
 import math
+import copy
 # Define mediapipe model
 mp_holistic = mp.solutions.holistic
 mp_drawing = mp.solutions.drawing_utils
@@ -55,46 +56,47 @@ def main():
         # Draw landmarks
         draw_styled_landmarks(image, results)
 
-        if number != -1 and not save_sequence:
-            # Start a new sequence
-            save_sequence = True
-            frame_count = 0
-            action_num = number 
-            action = actions[number]
-            last_dir[action] += 1
-            # Create directory
-            os.makedirs(os.path.join(DATA_PATH, action, str(last_dir[action])), exist_ok=True)
 
-            # Start colecting
-            cv2.putText(image, 'STARTING COLLECTION', (120,200), 
-                               cv2.FONT_HERSHEY_SIMPLEX, 1, (0,255, 0), 4, cv2.LINE_AA)
-            # Show to screen
-            cv2.imshow('OpenCV Feed', image)
-            cv2.waitKey(500)
+        # if number != -1 and not save_sequence:
+        #     # Start a new sequence
+        #     save_sequence = True
+        #     frame_count = 0
+        #     action_num = number 
+        #     action = actions[number]
+        #     last_dir[action] += 1
+        #     # Create directory
+        #     os.makedirs(os.path.join(DATA_PATH, action, str(last_dir[action])), exist_ok=True)
+
+        #     # Start colecting
+        #     cv2.putText(image, 'STARTING COLLECTION', (120,200), 
+        #                        cv2.FONT_HERSHEY_SIMPLEX, 1, (0,255, 0), 4, cv2.LINE_AA)
+        #     # Show to screen
+        #     cv2.imshow('OpenCV Feed', image)
+        #     cv2.waitKey(500)
 
 
-        else:
-            if save_sequence:
-                image = draw_info(image, action, last_dir[action])
-                # Export keypoints
-                keypoints = extract_keypoints(results)
-                npy_path = os.path.join(DATA_PATH, action, str(last_dir[action]), str(frame_count))
-                np.save(npy_path, keypoints)
-                # Increment frame count
-                frame_count += 1
+        # else:
+        #     if save_sequence:
+        #         image = draw_info(image, action, last_dir[action])
+        #         # Export keypoints
+        #         keypoints = extract_keypoints(results)
+        #         npy_path = os.path.join(DATA_PATH, action, str(last_dir[action]), str(frame_count))
+        #         np.save(npy_path, keypoints)
+        #         # Increment frame count
+        #         frame_count += 1
             
-            if frame_count == VIDEO_LENGTH:
-                save_sequence = False
-                frame_count = 0
-                cv2.putText(image, 'STOP COLECTING {}'.format(action), (120,200), 
-                               cv2.FONT_HERSHEY_SIMPLEX, 1, (0,0, 255), 4, cv2.LINE_AA)
+        #     if frame_count == VIDEO_LENGTH:
+        #         save_sequence = False
+        #         frame_count = 0
+        #         cv2.putText(image, 'STOP COLECTING {}'.format(action), (120,200), 
+        #                        cv2.FONT_HERSHEY_SIMPLEX, 1, (0,0, 255), 4, cv2.LINE_AA)
                 
-                print(f"Finished saving sequence for action {action}")
-                cv2.imshow('OpenCV Feed', image)
-                cv2.waitKey(500)
-
-            # Show to screen
-            cv2.imshow('OpenCV Feed', image)
+        #         print(f"Finished saving sequence for action {action}")
+        #         cv2.imshow('OpenCV Feed', image)
+        #         cv2.waitKey(500)kp_hands
+        p_landmarks = preprocess_landmarks(results)
+        # print(kp_hands)       # Show to screen
+        cv2.imshow('OpenCV Feed', image)
 
 
     cap.release()
@@ -173,12 +175,7 @@ def draw_styled_landmarks(image, results) -> None:
                              mp_drawing.DrawingSpec(color=(245,66,230), thickness=2, circle_radius=1)
                              )
 
-def calculate_distance(landmark1, landmark2):
-    """Calcola la distanza euclidea 3D tra due landmark."""
-    return math.sqrt((landmark1.x - landmark2.x)**2 +
-                     (landmark1.y - landmark2.y)**2 +
-                     (landmark1.z - landmark2.z)**2)
-
+# From Here
 def calculate_head_unit(pose_landmarks):
     """
     Calcola l'unità di misura 'head unit' basata sulla distanza tra le spalle.
@@ -209,7 +206,6 @@ def calculate_head_unit(pose_landmarks):
             print("Error: Could not find shoulder landmarks.")
             return None
     return None
-# TODO: Check if is necesary to do a preprocessing on landmakrs to get the relative position, not the absolute. 
 
 def rotate_point(x, y, angle_rad, center_x=0.5, center_y=0.5):
     """Applies 2D rotation to a point about a center."""
@@ -295,6 +291,111 @@ def apply_spatial_augmentations(results, angle_deg, squeeze_w1, squeeze_w2):
     return np.concatenate([pose_arr, lh_arr, rh_arr])
 
 # --- Esempio di utilizzo nel tuo ciclo di processing ---
+
+def normalize_hands_coordinates(kp_hands) -> np.ndarray:
+    """
+    Normalizes the coordinates of the left and right hand keypoints. It is normalized by the distance between the wrist and furthest point.
+    The coordinates are converted to relative coordinates based on the wrist position.
+    Args:
+        kp_hands: A tuple containing left and right hand keypoints.
+    Returns:
+        A numpy array containing the normalized coordinates of both hands.
+    """
+    temp_lh = copy.deepcopy(kp_hands[0])
+    temp_rh = copy.deepcopy(kp_hands[1])
+
+    # Convert to relative coordinates
+    lBase = (0, 0, 0)
+    rBase = (0, 0, 0)
+    l_dist = 0.0
+    r_dist = 0.0
+    for i in range(20):
+        if i == 0:
+            lBase = (temp_lh[i][0], temp_lh[i][1], temp_lh[i][2])
+            rBase = (temp_rh[i][0], temp_rh[i][1], temp_rh[i][2])
+
+        t_l_dist = calculate_distance(temp_lh[i], lBase)
+        t_r_dist = calculate_distance(temp_rh[i], rBase)
+        if (t_l_dist > l_dist):
+            l_dist = t_l_dist
+        if (t_r_dist > r_dist):
+            r_dist = t_r_dist
+
+        temp_lh[i] = temp_lh[i] - lBase
+        temp_rh[i] = temp_rh[i] - rBase
+
+    # Convert to a one-dimensional list
+    temp_lh = temp_lh.flatten()
+    temp_rh = temp_rh.flatten()
+
+    # Normalization
+    def l_normalize_(n):
+        return n / l_dist if l_dist != 0 else n
+    def r_normalize_(n):
+        return n / r_dist if r_dist != 0 else n
+
+    temp_lh = list(map(l_normalize_, temp_lh))
+    temp_rh = list(map(r_normalize_, temp_rh))
+
+    return np.array([temp_lh, temp_rh]).flatten()
+
+def normalize_pose_coordinates(kp_pose) -> np.ndarray:
+    """
+    Normalizes the coordinates of the pose keypoints. It is normalized by the distance between the shoulders.
+    The coordinates are converted to relative coordinates based on the nose position.
+    Args:
+        kp_pose: A numpy array containing pose keypoints.
+    Returns:
+        A numpy array containing the normalized coordinates of the pose keypoints.
+    """
+    shoulder_distance = calculate_distance(kp_pose[11], kp_pose[12])
+    temp_pose = kp_pose[:, :-1]
+    # Convert to relative coordinates
+    base = (0, 0, 0)
+    for i in range(33):
+        if i == 0:
+            base = (temp_pose[i][0], temp_pose[i][1], temp_pose[i][2])
+        temp_pose[i] = temp_pose[i] - base
+
+    # Convert to a one-dimensional list
+    temp_pose = temp_pose.flatten()
+
+    # Normalization
+    def normalize_(n):
+        return n / shoulder_distance if shoulder_distance != 0 else n
+
+    temp_pose = list(map(normalize_, temp_pose))
+
+    return np.array(temp_pose)
+
+def calculate_distance(landmark1, landmark2) -> float:
+    """
+    Calculates the Euclidean distance between two landmarks.
+    Args:
+        landmark1: First landmark (x, y, z).
+        landmark2: Second landmark (x, y, z).
+    Returns:
+        The Euclidean distance between the two landmarks.
+    """
+    visibility_th = 0.3
+    return math.sqrt((landmark1[0] - landmark2[0])**2 +
+                     (landmark1[1] - landmark2[1])**2 +
+                     (landmark1[2] - landmark2[2])**2)
+
+def extract_keypots_cordinates(results) -> tuple:
+    """
+    Extracts keypoints from the results and returns them as separate  matrices.
+    Args:
+        results: The detection results containing landmarks.
+    Returns:
+        A tuple containing pose, left hand, and right hand keypoints.
+    """
+    pose = np.array([[res.x, res.y, res.z, res.visibility] for res in results.pose_landmarks.landmark]) if results.pose_landmarks else np.zeros((33,4))
+    # face = np.array([[res.x, res.y, res.z] for res in results.face_landmarks.landmark]).flatten() if results.face_landmarks else np.zeros(468*3)
+    lh = np.array([[res.x, res.y, res.z] for res in results.left_hand_landmarks.landmark]) if results.left_hand_landmarks else np.zeros((21,3))
+    rh = np.array([[res.x, res.y, res.z] for res in results.right_hand_landmarks.landmark]) if results.right_hand_landmarks else np.zeros((21,3))
+    return (pose, np.array([lh, rh]))
+
 def extract_keypoints(results) -> np.ndarray:
     """
     Extracts keypoints from the results and flattens them into a single array.
@@ -368,6 +469,20 @@ def get_last_directory(actions) -> int:
             if last_non_empty_dir is None:
                 last_dir[action] = -1
         return last_dir
+
+def preprocess_landmarks(results) -> np.ndarray:
+    """
+    Preprocesses the landmarks by applying spatial augmentations and normalizing the coordinates.
+    Args:
+        results: The detection results containing landmarks.
+    Returns:
+        A concatenated numpy array of normalized pose and hand coordinates.
+    """
+    kp_pose, kp_hands = extract_keypots_cordinates(results)
+    norm_hands = normalize_hands_coordinates(kp_hands)
+    norm_pose = normalize_pose_coordinates(kp_pose)
+    return np.concatenate([norm_pose, norm_hands])
+
 
 if __name__ == '__main__':
     main()
