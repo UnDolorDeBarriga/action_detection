@@ -140,7 +140,7 @@ def draw_landmarks(image, results) -> None:
         image: The input image.
         results: The detection results containing landmarks.
     """
-    mp_drawing.draw_landmarks(image, results.face_landmarks, mp_holistic.FACEMESH_TESSELATION) # Draw face connections
+    #mp_drawing.draw_landmarks(image, results.face_landmarks, mp_holistic.FACEMESH_TESSELATION) # Draw face connections
     mp_drawing.draw_landmarks(image, results.pose_landmarks, mp_holistic.POSE_CONNECTIONS) # Draw pose connections
     mp_drawing.draw_landmarks(image, results.left_hand_landmarks, mp_holistic.HAND_CONNECTIONS) # Draw left hand connections
     mp_drawing.draw_landmarks(image, results.right_hand_landmarks, mp_holistic.HAND_CONNECTIONS) # Draw right hand connections
@@ -153,10 +153,10 @@ def draw_styled_landmarks(image, results) -> None:
         results: The detection results containing landmarks.
     """
     # Draw face connections
-    mp_drawing.draw_landmarks(image, results.face_landmarks, mp_holistic.FACEMESH_TESSELATION, 
-                             mp_drawing.DrawingSpec(color=(80,110,10), thickness=1, circle_radius=1), 
-                             mp_drawing.DrawingSpec(color=(80,256,121), thickness=1, circle_radius=1)
-                             ) 
+    # mp_drawing.draw_landmarks(image, results.face_landmarks, mp_holistic.FACEMESH_TESSELATION, 
+    #                          mp_drawing.DrawingSpec(color=(80,110,10), thickness=1, circle_radius=1), 
+    #                          mp_drawing.DrawingSpec(color=(80,256,121), thickness=1, circle_radius=1)
+    #                          ) 
     # Draw pose connections
     mp_drawing.draw_landmarks(image, results.pose_landmarks, mp_holistic.POSE_CONNECTIONS,
                              mp_drawing.DrawingSpec(color=(80,22,10), thickness=2, circle_radius=4), 
@@ -173,6 +173,41 @@ def draw_styled_landmarks(image, results) -> None:
                              mp_drawing.DrawingSpec(color=(245,66,230), thickness=2, circle_radius=1)
                              )
 
+def calculate_distance(landmark1, landmark2):
+    """Calcola la distanza euclidea 3D tra due landmark."""
+    return math.sqrt((landmark1.x - landmark2.x)**2 +
+                     (landmark1.y - landmark2.y)**2 +
+                     (landmark1.z - landmark2.z)**2)
+
+def calculate_head_unit(pose_landmarks):
+    """
+    Calcola l'unità di misura 'head unit' basata sulla distanza tra le spalle.
+    Args:
+        pose_landmarks: Oggetto landmarks della posa da MediaPipe.
+    Returns:
+        La dimensione della head unit, o None se le spalle non sono visibili.
+    """
+    if pose_landmarks:
+        landmarks = pose_landmarks.landmark
+        try:
+            left_shoulder = landmarks[mp_pose.LEFT_SHOULDER.value]
+            right_shoulder = landmarks[mp_pose.RIGHT_SHOULDER.value]
+            # Verifica la visibilità (opzionale ma consigliato)
+            if left_shoulder.visibility < 0.5 or right_shoulder.visibility < 0.5:
+                 print("Warning: Shoulders not clearly visible.")
+                 # Potresti decidere di non calcolare se la visibilità è bassa
+                 # return None
+            
+            shoulder_distance = calculate_distance(left_shoulder, right_shoulder)
+            if shoulder_distance < 1e-6: # Evita divisione per zero o valori minuscoli
+                 return None
+            head_unit = shoulder_distance / 2.0
+            return head_unit
+        except (IndexError, AttributeError):
+            # Landmark non trovati o oggetto non valido
+            print("Error: Could not find shoulder landmarks.")
+            return None
+    return None
 # TODO: Check if is necesary to do a preprocessing on landmakrs to get the relative position, not the absolute. 
 def extract_keypoints(results) -> np.ndarray:
     """
@@ -183,10 +218,11 @@ def extract_keypoints(results) -> np.ndarray:
         A flattened array of keypoints.
     """
     pose = np.array([[res.x, res.y, res.z, res.visibility] for res in results.pose_landmarks.landmark]).flatten() if results.pose_landmarks else np.zeros(33*4)
-    face = np.array([[res.x, res.y, res.z] for res in results.face_landmarks.landmark]).flatten() if results.face_landmarks else np.zeros(468*3)
+    # face = np.array([[res.x, res.y, res.z] for res in results.face_landmarks.landmark]).flatten() if results.face_landmarks else np.zeros(468*3)
     lh = np.array([[res.x, res.y, res.z] for res in results.left_hand_landmarks.landmark]).flatten() if results.left_hand_landmarks else np.zeros(21*3)
     rh = np.array([[res.x, res.y, res.z] for res in results.right_hand_landmarks.landmark]).flatten() if results.right_hand_landmarks else np.zeros(21*3)
-    return np.concatenate([pose, face, lh, rh])
+    #return np.concatenate([pose, face, lh, rh])
+    return np.concatenate([pose,lh, rh])
 
 def select_num(key, number) -> tuple:
     """
