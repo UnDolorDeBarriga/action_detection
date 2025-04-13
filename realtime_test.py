@@ -51,7 +51,7 @@ def main():
     sequence = []
     sentence = []
     predictions = []
-    threshold = 0.9
+    threshold = 0.8
     while True:
         # ESC (27) to exit teh loop
         key = cv2.waitKey(16)
