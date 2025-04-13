@@ -3,12 +3,8 @@ os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
 
 import cv2
 import numpy as np
-from matplotlib import pyplot as plt
-import time
 import mediapipe as mp
-import csv
-from main import get_last_directory, load_model_lables, draw_info, select_num, extract_keypoints, draw_styled_landmarks, mediapipe_detection
-import sys
+from main import get_last_directory, load_model_lables, extract_keypoints, draw_styled_landmarks, mediapipe_detection, preprocess_landmarks
 
 # Define mediapipe model
 mp_holistic = mp.solutions.holistic
@@ -22,15 +18,15 @@ def main():
     no_sequences = 5
     sequence_length = 25
 
-
-
     # Load actions to detect
     actions = load_model_lables()
     print(f"Loaded model labels: {actions}")
 
+    # Get Last Non-empty Directory
     last_dir = get_last_directory(actions)
     print(f"Last non-empty directory: {last_dir}")
 
+    # Create directories to store data
     for action in actions: 
         for sequence in range(1,no_sequences+1):
             try: 
@@ -41,14 +37,15 @@ def main():
 
     # Video capture
     cap = cv2.VideoCapture(0)
-    # cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1920)
-    # cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 1080)
+    cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1920)
+    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 1080)
 
     mp_holistic_obj = mp_holistic.Holistic(
         min_detection_confidence=0.5, 
         min_tracking_confidence=0.5,
     )   
 
+    # Whait untill space is pressed to start collection
     while cv2.waitKey(30) != 32:
         ret, image_i = cap.read()
         image_i = cv2.flip(image_i, 1)
@@ -56,7 +53,7 @@ def main():
             cv2.FONT_HERSHEY_SIMPLEX, 1, (0,0, 0), 4, cv2.LINE_AA)
         cv2.imshow('OpenCV Feed', image_i)
         cv2.waitKey(1)
-
+    cv2.waitKey(1)
      
     for action in actions:
         # Loop through sequences aka videos
@@ -75,21 +72,22 @@ def main():
                 
                 # Apply wait logic
                 if frame_num == 0: 
+                    # If is the first frame of capturing
                     cv2.putText(image, 'STARTING COLLECTION {}'.format(action), (120,200), 
                             cv2.FONT_HERSHEY_SIMPLEX, 1, (0,255, 0), 4, cv2.LINE_AA)
                     cv2.putText(image, 'Collecting frames for {} Video Number {}'.format(action, sequence), (15,12), 
                             cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 1, cv2.LINE_AA)
-                    # Show to screen
                     cv2.imshow('OpenCV Feed', image)
                     cv2.waitKey(int(DELAY*1000))
                 else: 
+                    # When collecting frames
                     cv2.putText(image, 'Collecting frames for {} Video Number {}'.format(action, sequence), (15,12), 
                             cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 1, cv2.LINE_AA)
-                    # Show to screen
                     cv2.imshow('OpenCV Feed', image)
                 
-                # NEW Export keypoints
-                keypoints = extract_keypoints(results)
+                # Extract keypoints
+                # keypoints = extract_keypoints(results)
+                keypoints = preprocess_landmarks(results)
                 npy_path = os.path.join(DATA_PATH, action, str(sequence), str(frame_num))
                 np.save(npy_path, keypoints)
 
