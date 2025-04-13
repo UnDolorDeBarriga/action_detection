@@ -7,7 +7,7 @@ from matplotlib import pyplot as plt
 import time
 import mediapipe as mp
 import csv
-
+import math
 # Define mediapipe model
 mp_holistic = mp.solutions.holistic
 mp_drawing = mp.solutions.drawing_utils
@@ -187,6 +187,7 @@ def calculate_head_unit(pose_landmarks):
     Returns:
         La dimensione della head unit, o None se le spalle non sono visibili.
     """
+    mp_pose = mp.solutions.pose.PoseLandmark
     if pose_landmarks:
         landmarks = pose_landmarks.landmark
         try:
@@ -209,6 +210,91 @@ def calculate_head_unit(pose_landmarks):
             return None
     return None
 # TODO: Check if is necesary to do a preprocessing on landmakrs to get the relative position, not the absolute. 
+
+def rotate_point(x, y, angle_rad, center_x=0.5, center_y=0.5):
+    """Applies 2D rotation to a point about a center."""
+    x_shifted = x - center_x
+    y_shifted = y - center_y
+    x_rotated = x_shifted * math.cos(angle_rad) - y_shifted * math.sin(angle_rad)
+    y_rotated = y_shifted * math.cos(angle_rad) + x_shifted * math.sin(angle_rad)
+    return x_rotated + center_x, y_rotated + center_y
+
+def squeeze_point_x(x, w1, w2, W=1.0):
+    """Applies horizontal squeeze to the x coordinate."""
+    # Ensure the denominator is not too close to zero to avoid instability
+    denominator = W - (w1 + w2)
+    if abs(denominator) < 1e-6: # Avoid division by zero or very small values
+        # In this limiting case (w1+w2 almost equal to W), you could return 0.5
+        # or handle as you like. Here we return the original value.
+        print(f"Warning: Squeeze denominator near zero ({denominator}). Skipping squeeze for this x.")
+        return x
+    return (x - w1) / denominator
+
+def apply_spatial_augmentations(results, angle_deg, squeeze_w1, squeeze_w2):
+    """
+        Apply rotation and squeeze to MediaPipe landmarks.
+
+        Args:
+            results: The output of the MediaPipe Holistic model.
+            angle_deg: The rotation angle in degrees (randomly generated per instance).
+            squeeze_w1: Left squeeze proportion (randomly generated per instance).
+            squeeze_w2: Right squeeze proportion (randomly generated per instance).
+
+        Returns:
+            A concatenated NumPy array of augmented landmarks [pose, lh, rh].
+        """
+    angle_rad = math.radians(angle_deg)
+    W = 1.0 # Larghezza normalizzata del frame
+
+    augmented_pose = []
+    augmented_lh = []
+    augmented_rh = []
+
+    # Processa Pose Landmarks
+    if results.pose_landmarks:
+        for lm in results.pose_landmarks.landmark:
+            x, y = lm.x, lm.y
+            # 1. Applica Rotazione
+            x_rot, y_rot = rotate_point(x, y, angle_rad)
+            # 2. Applica Squeeze alla coordinata x ruotata
+            x_sq = squeeze_point_x(x_rot, squeeze_w1, squeeze_w2, W)
+            # Conserva y ruotata, z e visibilità originali
+            augmented_pose.extend([x_sq, y_rot, lm.z, lm.visibility])
+    else:
+        augmented_pose = np.zeros(33 * 4)
+
+    # Processa Left Hand Landmarks
+    if results.left_hand_landmarks:
+        for lm in results.left_hand_landmarks.landmark:
+            x, y = lm.x, lm.y
+            # 1. Applica Rotazione
+            x_rot, y_rot = rotate_point(x, y, angle_rad)
+            # 2. Applica Squeeze
+            x_sq = squeeze_point_x(x_rot, squeeze_w1, squeeze_w2, W)
+            augmented_lh.extend([x_sq, y_rot, lm.z])
+    else:
+        augmented_lh = np.zeros(21 * 3)
+
+    # Processa Right Hand Landmarks
+    if results.right_hand_landmarks:
+        for lm in results.right_hand_landmarks.landmark:
+            x, y = lm.x, lm.y
+            # 1. Applica Rotazione
+            x_rot, y_rot = rotate_point(x, y, angle_rad)
+            # 2. Applica Squeeze
+            x_sq = squeeze_point_x(x_rot, squeeze_w1, squeeze_w2, W)
+            augmented_rh.extend([x_sq, y_rot, lm.z])
+    else:
+        augmented_rh = np.zeros(21 * 3)
+
+    # Concatena i risultati (assicurandoti che siano array numpy)
+    pose_arr = np.array(augmented_pose).flatten()
+    lh_arr = np.array(augmented_lh).flatten()
+    rh_arr = np.array(augmented_rh).flatten()
+
+    return np.concatenate([pose_arr, lh_arr, rh_arr])
+
+# --- Esempio di utilizzo nel tuo ciclo di processing ---
 def extract_keypoints(results) -> np.ndarray:
     """
     Extracts keypoints from the results and flattens them into a single array.
