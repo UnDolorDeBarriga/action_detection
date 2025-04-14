@@ -26,7 +26,7 @@ mp_holistic = mp.solutions.holistic
 mp_drawing = mp.solutions.drawing_utils
 DATA_PATH = os.path.join('model/data') 
                           # Number of frames to save for each action
-COLORS = [(245,117,16), (117,245,16), (16,117,245)]
+COLORS = [(245,117,16), (117,245,16), (16,117,245), (245,16,117), (16,245,117), (117,16,245), (245,117,16)]
 
 def main():
     # Configure GPU if available
