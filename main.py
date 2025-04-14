@@ -445,30 +445,36 @@ def draw_info(image, action, sequence) -> np.ndarray:
                                cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 1, cv2.LINE_AA)
     return image
 
-def get_last_directory(actions) -> int:
-        """
-        Gets the last non-empty directory for each action.
-        Creates directories for each action if they don't exist.
-        Args:
-            actions: List of action names.
-        Returns:
-            last_dir: Dictionary with action names as keys and last non-empty directory as values.
-        """
-        for action in actions: 
-            os.makedirs(os.path.join(DATA_PATH, action), exist_ok=True)
+import os
+
+def get_last_directory(actions) -> dict:
+    """
+    Gets the directory with the highest numerical name for each action.
+    Creates directories for each action if they don't exist.
+    
+    Args:
+        actions: List of action names.
+    
+    Returns:
+        last_dir: Dictionary with action names as keys and the highest numbered directory as values,
+                  or -1 if no directories with numeric names exist.
+    """
+    last_dir = {}
+    
+    for action in actions: 
+        action_path = os.path.join(DATA_PATH, action)
+        os.makedirs(action_path, exist_ok=True)
+
+        max_numeric_folder = -1
+        for folder in os.listdir(action_path):
+            folder_path = os.path.join(action_path, folder)
+            if os.path.isdir(folder_path) and folder.isdigit():
+                if os.listdir(folder_path):  # ensure it's not empty
+                    max_numeric_folder = max(max_numeric_folder, int(folder))
         
-        last_dir = {}
-        for action in actions:
-            last_non_empty_dir = None
-            for folder in sorted(os.listdir(os.path.join(DATA_PATH, action)), reverse=True):
-                folder_path = os.path.join(DATA_PATH, action, folder)
-                if os.path.isdir(folder_path) and os.listdir(folder_path):
-                    last_non_empty_dir = folder
-                    last_dir[action] = int(folder)
-                    break
-            if last_non_empty_dir is None:
-                last_dir[action] = -1
-        return last_dir
+        last_dir[action] = max_numeric_folder
+
+    return last_dir
 
 def preprocess_landmarks(results) -> np.ndarray:
     """
