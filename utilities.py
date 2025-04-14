@@ -13,7 +13,7 @@ import copy
 mp_holistic = mp.solutions.holistic
 mp_drawing = mp.solutions.drawing_utils
 DATA_PATH = os.path.join('model/data') 
-VIDEO_LENGTH = 30                               # Number of frames to save for each action
+VIDEO_LENGTH = 25                               # Number of frames to save for each action
 
 def main():
     # Load actions to detect
@@ -174,58 +174,7 @@ def draw_styled_landmarks(image, results) -> None:
                              mp_drawing.DrawingSpec(color=(245,117,66), thickness=2, circle_radius=3), 
                              mp_drawing.DrawingSpec(color=(245,66,230), thickness=2, circle_radius=1)
                              )
-
-# From Here
-def calculate_head_unit(pose_landmarks):
-    """
-    Calcola l'unità di misura 'head unit' basata sulla distanza tra le spalle.
-    Args:
-        pose_landmarks: Oggetto landmarks della posa da MediaPipe.
-    Returns:
-        La dimensione della head unit, o None se le spalle non sono visibili.
-    """
-    mp_pose = mp.solutions.pose.PoseLandmark
-    if pose_landmarks:
-        landmarks = pose_landmarks.landmark
-        try:
-            left_shoulder = landmarks[mp_pose.LEFT_SHOULDER.value]
-            right_shoulder = landmarks[mp_pose.RIGHT_SHOULDER.value]
-            # Verifica la visibilità (opzionale ma consigliato)
-            if left_shoulder.visibility < 0.5 or right_shoulder.visibility < 0.5:
-                 print("Warning: Shoulders not clearly visible.")
-                 # Potresti decidere di non calcolare se la visibilità è bassa
-                 # return None
-            
-            shoulder_distance = calculate_distance(left_shoulder, right_shoulder)
-            if shoulder_distance < 1e-6: # Evita divisione per zero o valori minuscoli
-                 return None
-            head_unit = shoulder_distance / 2.0
-            return head_unit
-        except (IndexError, AttributeError):
-            # Landmark non trovati o oggetto non valido
-            print("Error: Could not find shoulder landmarks.")
-            return None
-    return None
-
-def rotate_point(x, y, angle_rad, center_x=0.5, center_y=0.5):
-    """Applies 2D rotation to a point about a center."""
-    x_shifted = x - center_x
-    y_shifted = y - center_y
-    x_rotated = x_shifted * math.cos(angle_rad) - y_shifted * math.sin(angle_rad)
-    y_rotated = y_shifted * math.cos(angle_rad) + x_shifted * math.sin(angle_rad)
-    return x_rotated + center_x, y_rotated + center_y
-
-def squeeze_point_x(x, w1, w2, W=1.0):
-    """Applies horizontal squeeze to the x coordinate."""
-    # Ensure the denominator is not too close to zero to avoid instability
-    denominator = W - (w1 + w2)
-    if abs(denominator) < 1e-6: # Avoid division by zero or very small values
-        # In this limiting case (w1+w2 almost equal to W), you could return 0.5
-        # or handle as you like. Here we return the original value.
-        print(f"Warning: Squeeze denominator near zero ({denominator}). Skipping squeeze for this x.")
-        return x
-    return (x - w1) / denominator
-
+#-----------------------
 def apply_spatial_augmentations(results, angle_deg, squeeze_w1, squeeze_w2):
     """
         Apply rotation and squeeze to MediaPipe landmarks.
@@ -291,6 +240,74 @@ def apply_spatial_augmentations(results, angle_deg, squeeze_w1, squeeze_w2):
     return np.concatenate([pose_arr, lh_arr, rh_arr])
 
 # --- Esempio di utilizzo nel tuo ciclo di processing ---
+def squeeze_data(sequences, max_squeeze_proportion) -> np.ndarray:
+    """
+    Applies squeeze to the x-coordinates of the sequences based on the specified proportion.
+    Args:
+        sequences: A numpy array containing the sequences of keypoints.
+        max_squeeze_proportion: Maximum proportion for squeezing.
+    Returns:
+        A numpy array containing the squeezed sequences.
+    """
+    n, n_frames, total_features = sequences.shape
+    squeezed_sequences = np.copy(sequences)
+
+    W = 1.0
+
+    for i in range(n):
+        w1 = np.random.uniform(0, max_squeeze_proportion)
+        w2 = np.random.uniform(0, max_squeeze_proportion)
+        new_W = W - (w1 + w2)
+        for frame_idx in range(n_frames):
+            for j in range(0, total_features, 3):
+                x = sequences[i, frame_idx, j]
+                squeezed_x = (x - w1) / new_W
+                squeezed_sequences[i, frame_idx, j] = squeezed_x
+
+    return squeezed_sequences
+
+def rotate_data(sequences, rotations) -> np.ndarray:
+    """
+    Rotates the hand coordinates in the sequences based on the specified angles.
+    Args:
+        sequences: A numpy array containing the sequences of keypoints.
+        rotations: A list of angles in degrees for rotation.
+    Returns:
+        A numpy array containing the rotated sequences."""
+    pose_length = 99
+    hand_length = 63
+
+    hand_l_start = pose_length
+    hand_l_end = pose_length + hand_length
+    hand_r_start = pose_length + hand_length
+    hand_r_end = pose_length + 2 * hand_length
+
+    _, n_frames, _ = sequences.shape
+
+    rotated_sequences = np.copy(sequences)
+    
+    for i, rot in enumerate(rotations):
+        cos_theta = np.cos(np.radians(rot))
+        sin_theta = np.sin(np.radians(rot))
+        rotation_matrix = np.array([[cos_theta, -sin_theta],
+                                  [sin_theta, cos_theta]])
+        
+        for frame_idx in range(n_frames):
+            # Extract x, y coordinates for left and right hands
+            hand_l = sequences[i, frame_idx, hand_l_start:hand_l_end].reshape(21, 3)[:, :2]
+            hand_r = sequences[i, frame_idx, hand_r_start:hand_r_end].reshape(21, 3)[:, :2]
+
+            # Rotate left hand
+            rotated_hand_l = np.dot(hand_l, rotation_matrix)
+            rotated_sequences[i, frame_idx, hand_l_start:hand_l_end-1:3] = rotated_hand_l[:, 0]
+            rotated_sequences[i, frame_idx, hand_l_start+1:hand_l_end:3] = rotated_hand_l[:, 1]
+
+            # Rotate right hand
+            rotated_hand_r = np.dot(hand_r, rotation_matrix)
+            rotated_sequences[i, frame_idx, hand_r_start:hand_r_end-1:3] = rotated_hand_r[:, 0]
+            rotated_sequences[i, frame_idx, hand_r_start+1:hand_r_end:3] = rotated_hand_r[:, 1]
+
+    return rotated_sequences
 
 def normalize_hands_coordinates(kp_hands) -> np.ndarray:
     """
@@ -487,7 +504,59 @@ def preprocess_landmarks(results) -> np.ndarray:
     kp_pose, kp_hands = extract_keypots_cordinates(results)
     norm_hands = normalize_hands_coordinates(kp_hands)
     norm_pose = normalize_pose_coordinates(kp_pose)
+    # print(f"Pose shape: {norm_pose.shape}, Hands shape: {norm_hands.shape}")
     return np.concatenate([norm_pose, norm_hands])
+
+def sequential_arm_rotation(sequences, max_angle_degrees, rotation_probability) -> np.ndarray:
+    """
+    Sequentially rotates arm joints in a sequence of pose landmarks.
+    Arms are rotated with a given probability and angle.
+    Args:
+        sequences (np.ndarray): Input sequences of shape (n, num_frames, 99).
+        max_angle_degrees (float): Maximum angle for rotation in degrees.
+        rotation_probability (float): Probability of applying rotation.
+    Returns:
+        np.ndarray: Rotated sequences of the same shape as input.
+    """
+    n, num_frames, _ = sequences.shape
+    rotated_sequences = np.copy(sequences)
+
+    arm_joints = [11, 12, 13, 14, 15, 16] # Indices for left and right shoulders, elbows, and wrists
+
+    for i in range(n):
+        for frame_idx in range(num_frames):
+            prev_coords = None  # Store coordinates of the "previous" joint
+
+            for joint_idx in arm_joints:
+                start_idx = joint_idx * 3
+                end_idx = start_idx + 3
+
+                rotated_coords = sequences[i, frame_idx, start_idx:end_idx].copy() # Define it here
+
+                if np.random.rand() < rotation_probability:
+                    theta = np.radians(np.random.uniform(-max_angle_degrees, max_angle_degrees))
+                    cos_theta = np.cos(theta)
+                    sin_theta = np.sin(theta)
+                    rotation_matrix = np.array([[cos_theta, -sin_theta],
+                                              [sin_theta, cos_theta]])
+
+                    joint_coords = sequences[i, frame_idx, start_idx:end_idx]  # Extract x, y, z
+
+                    # Rotate relative to the previous joint (if available)
+                    if prev_coords is not None:
+                        offset = joint_coords[:2] - prev_coords[:2]  # Offset of x, y
+                        rotated_offset = np.dot(offset, rotation_matrix)
+                        rotated_coords[:2] = prev_coords[:2] + rotated_offset
+                    else:
+                        rotated_coords[:2] = np.dot(joint_coords[:2], rotation_matrix)
+
+                    rotated_sequences[i, frame_idx, start_idx:start_idx + 2] = rotated_coords[:2]  # Update x, y
+
+                # Update prev_coords for the next joint
+                
+                prev_coords = sequences[i, frame_idx, start_idx:end_idx].copy()
+
+    return rotated_sequences
 
 
 if __name__ == '__main__':

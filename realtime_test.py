@@ -6,10 +6,11 @@ import numpy as np
 import mediapipe as mp
 from tensorflow.keras.models import load_model # type: ignore
 import tensorflow as tf
-from main import load_model_lables, extract_keypoints, draw_styled_landmarks, mediapipe_detection, preprocess_landmarks
+from utilities import load_model_lables, extract_keypoints, draw_styled_landmarks, mediapipe_detection, preprocess_landmarks
+from utilities import VIDEO_LENGTH
 
 #TODO: 1: Take out face
-    #Normalization
+    # Normalization
     # Rotations
     # Squeeze
     # Prespective
@@ -24,8 +25,8 @@ from main import load_model_lables, extract_keypoints, draw_styled_landmarks, me
 mp_holistic = mp.solutions.holistic
 mp_drawing = mp.solutions.drawing_utils
 DATA_PATH = os.path.join('model/data') 
-VIDEO_LENGTH = 25                               # Number of frames to save for each action
-COLORS = [(245,117,16), (117,245,16), (16,117,245), (245,16,117)]
+                          # Number of frames to save for each action
+COLORS = [(245,117,16), (117,245,16), (16,117,245)]
 
 def main():
     # Configure GPU if available
@@ -74,7 +75,6 @@ def main():
         # Extract keypoints
         # keypoints = extract_keypoints(results)
         keypoints = preprocess_landmarks(results)
-
 
         #TODO: 2
         if  results.left_hand_landmarks is not None or results.right_hand_landmarks is not None:

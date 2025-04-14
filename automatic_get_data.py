@@ -4,7 +4,8 @@ os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
 import cv2
 import numpy as np
 import mediapipe as mp
-from main import get_last_directory, load_model_lables, extract_keypoints, draw_styled_landmarks, mediapipe_detection, preprocess_landmarks
+from utilities import get_last_directory, load_model_lables, extract_keypoints, draw_styled_landmarks, mediapipe_detection, preprocess_landmarks
+from utilities import VIDEO_LENGTH
 
 # Define mediapipe model
 mp_holistic = mp.solutions.holistic
@@ -15,8 +16,8 @@ DELAY = 0.7
 
 def main():
     # Set up variables
-    no_sequences = 15
-    sequence_length = 25
+    no_sequences = 5
+    sequence_length = VIDEO_LENGTH
 
     # Load actions to detect
     actions = load_model_lables()
