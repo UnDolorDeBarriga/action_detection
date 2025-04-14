@@ -174,72 +174,7 @@ def draw_styled_landmarks(image, results) -> None:
                              mp_drawing.DrawingSpec(color=(245,117,66), thickness=2, circle_radius=3), 
                              mp_drawing.DrawingSpec(color=(245,66,230), thickness=2, circle_radius=1)
                              )
-#-----------------------
-def apply_spatial_augmentations(results, angle_deg, squeeze_w1, squeeze_w2):
-    """
-        Apply rotation and squeeze to MediaPipe landmarks.
 
-        Args:
-            results: The output of the MediaPipe Holistic model.
-            angle_deg: The rotation angle in degrees (randomly generated per instance).
-            squeeze_w1: Left squeeze proportion (randomly generated per instance).
-            squeeze_w2: Right squeeze proportion (randomly generated per instance).
-
-        Returns:
-            A concatenated NumPy array of augmented landmarks [pose, lh, rh].
-        """
-    angle_rad = math.radians(angle_deg)
-    W = 1.0 # Larghezza normalizzata del frame
-
-    augmented_pose = []
-    augmented_lh = []
-    augmented_rh = []
-
-    # Processa Pose Landmarks
-    if results.pose_landmarks:
-        for lm in results.pose_landmarks.landmark:
-            x, y = lm.x, lm.y
-            # 1. Applica Rotazione
-            x_rot, y_rot = rotate_point(x, y, angle_rad)
-            # 2. Applica Squeeze alla coordinata x ruotata
-            x_sq = squeeze_point_x(x_rot, squeeze_w1, squeeze_w2, W)
-            # Conserva y ruotata, z e visibilità originali
-            augmented_pose.extend([x_sq, y_rot, lm.z, lm.visibility])
-    else:
-        augmented_pose = np.zeros(33 * 4)
-
-    # Processa Left Hand Landmarks
-    if results.left_hand_landmarks:
-        for lm in results.left_hand_landmarks.landmark:
-            x, y = lm.x, lm.y
-            # 1. Applica Rotazione
-            x_rot, y_rot = rotate_point(x, y, angle_rad)
-            # 2. Applica Squeeze
-            x_sq = squeeze_point_x(x_rot, squeeze_w1, squeeze_w2, W)
-            augmented_lh.extend([x_sq, y_rot, lm.z])
-    else:
-        augmented_lh = np.zeros(21 * 3)
-
-    # Processa Right Hand Landmarks
-    if results.right_hand_landmarks:
-        for lm in results.right_hand_landmarks.landmark:
-            x, y = lm.x, lm.y
-            # 1. Applica Rotazione
-            x_rot, y_rot = rotate_point(x, y, angle_rad)
-            # 2. Applica Squeeze
-            x_sq = squeeze_point_x(x_rot, squeeze_w1, squeeze_w2, W)
-            augmented_rh.extend([x_sq, y_rot, lm.z])
-    else:
-        augmented_rh = np.zeros(21 * 3)
-
-    # Concatena i risultati (assicurandoti che siano array numpy)
-    pose_arr = np.array(augmented_pose).flatten()
-    lh_arr = np.array(augmented_lh).flatten()
-    rh_arr = np.array(augmented_rh).flatten()
-
-    return np.concatenate([pose_arr, lh_arr, rh_arr])
-
-# --- Esempio di utilizzo nel tuo ciclo di processing ---
 def squeeze_data(sequences, max_squeeze_proportion) -> np.ndarray:
     """
     Applies squeeze to the x-coordinates of the sequences based on the specified proportion.
@@ -462,7 +397,67 @@ def draw_info(image, action, sequence) -> np.ndarray:
                                cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 1, cv2.LINE_AA)
     return image
 
-import os
+def mirror_pose_sequence(sequences) -> np.ndarray:
+    """
+    Mirrors the pose sequence by swapping left and right landmarks.
+    Args:
+        sequences: A numpy array containing the sequences of keypoints.
+    Returns:
+        A numpy array containing the mirrored sequences.
+    """
+
+    n, num_frames, _ = sequences.shape
+    mirrored_sequences = np.copy(sequences)
+
+    # Pose landmark pairs to swap
+    pose_landmark_pairs = [
+        (11, 12),  # left_shoulder <-> right_shoulder
+        (13, 14),  # left_elbow    <-> right_elbow
+        (15, 16),  # left_wrist    <-> right_wrist
+        (17, 18),  # left_pinky    <-> right_pinky
+        (19, 20),  # left_index    <-> right_index
+        (21, 22),  # left_thumb    <-> right_thumb
+        (7, 8)     # left_ear      <-> right_ear
+    ]
+
+    pose_length = 33 * 3
+    hand_length = 21 * 3
+
+    left_hand_start = pose_length  # 99
+    left_hand_end = pose_length + hand_length  # 99 + 63 = 162
+    right_hand_start = left_hand_end  # 162
+    right_hand_end = left_hand_end + hand_length  # 162 + 63 = 225
+
+    for i in range(n):
+        for frame_idx in range(num_frames):
+            # Mirror Pose
+            for left_idx, right_idx in pose_landmark_pairs:
+                left_start = left_idx * 3
+                left_end = left_start + 3
+                right_start = right_idx * 3
+                right_end = right_start + 3
+
+                mirrored_sequences[i, frame_idx, left_start:left_end], \
+                    mirrored_sequences[i, frame_idx, right_start:right_end] = \
+                    sequences[i, frame_idx, right_start:right_end].copy(), \
+                    sequences[i, frame_idx, left_start:left_end].copy()
+
+                mirrored_sequences[i, frame_idx, left_start] *= -1
+                mirrored_sequences[i, frame_idx, right_start] *= -1
+
+            # Mirror Hands
+            mirrored_sequences[i, frame_idx, left_hand_start:left_hand_end], \
+                mirrored_sequences[i, frame_idx, right_hand_start:right_hand_end] = \
+                sequences[i, frame_idx, right_hand_start:right_hand_end].copy(), \
+                sequences[i, frame_idx, left_hand_start:left_hand_end].copy()
+
+            # Invert the x-coordinate of the hands
+            for j in range(21):
+                mirrored_sequences[i, frame_idx, left_hand_start + j * 3] *= -1  # Left hand x
+                mirrored_sequences[i, frame_idx, right_hand_start + j * 3] *= -1  # Right hand x
+
+    return mirrored_sequences
+
 
 def get_last_directory(actions) -> dict:
     """
