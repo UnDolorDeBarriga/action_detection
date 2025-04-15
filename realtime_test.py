@@ -26,7 +26,7 @@ mp_holistic = mp.solutions.holistic
 mp_drawing = mp.solutions.drawing_utils
 DATA_PATH = os.path.join('model/data') 
                           # Number of frames to save for each action
-COLORS = [(245,117,16), (117,245,16), (16,117,245)]
+COLORS = [(245,117,16), (117,245,16), (16,117,245), (245,16,117), (16,245,117), (117,16,245), (245,117,16)]
 
 def main():
     # Configure GPU if available
@@ -52,7 +52,8 @@ def main():
     sequence = []
     sentence = []
     predictions = []
-    threshold = 0.9
+    threshold = 0.8
+    n_frame_without_hands = 0
     while True:
         # ESC (27) to exit teh loop
         key = cv2.waitKey(16)
@@ -76,15 +77,19 @@ def main():
         keypoints = preprocess_landmarks(results)
 
         #TODO: 2
-        sequence.append(keypoints)
-        sequence = sequence[-VIDEO_LENGTH:]
-        print(f"Sequence length: {len(sequence)}")
-        # print(f"RH: {np.all(keypoints[-21*3:])}, LH: {np.all(keypoints[-2*21*3:-21*3])}, Size: {len(sequence)}")
-        # if np.all(keypoints[-21*3:]) != 0 or np.all(keypoints[-2*21*3:-21*3]) != 0:
-        #     sequence.append(keypoints)
-        #     sequence = sequence[-25:]
-        
-        if len(sequence) == VIDEO_LENGTH:
+        if  results.left_hand_landmarks is not None or results.right_hand_landmarks is not None:
+            sequence.append(keypoints)
+            sequence = sequence[-25:]
+            print(f"Sequence length: {len(sequence)}")
+            n_frame_without_hands = 0
+        else:
+            print(f"No hands detected")
+            n_frame_without_hands += 1
+            if n_frame_without_hands > 5:
+                sequence = []
+                n_frame_without_hands = 0
+                print(f"Sequence reset due to no hands detected")
+        if len(sequence) == 25:
             res = model.predict(np.expand_dims(sequence, axis=0))[0]
             print(actions[np.argmax(res)])
             print(res[np.argmax(res)])
