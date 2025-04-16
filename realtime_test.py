@@ -54,6 +54,7 @@ def main():
     predictions = []
     threshold = 0.8
     n_frame_without_hands = 0
+    n_frame_without_prediction = 0
     while True:
         # ESC (27) to exit teh loop
         key = cv2.waitKey(16)
@@ -98,13 +99,20 @@ def main():
             
             #3. Viz logic
             # if np.unique(predictions[-10:])[0]==np.argmax(res): 
-            if res[np.argmax(res)] > threshold: 
+            if res[np.argmax(res)] > threshold:
+                n_frame_without_prediction = 0 
                 if len(sentence) > 0: 
                     if actions[np.argmax(res)] != sentence[-1]:
                         sentence.append(actions[np.argmax(res)])
                 else:
                     sentence.append(actions[np.argmax(res)])
                 sequence = []
+            else:
+                n_frame_without_prediction += 1
+                if n_frame_without_prediction > 5:
+                    sequence = []
+                    n_frame_without_prediction = 0
+                    print(f"Sequence reset due to no prediction")
             if len(sentence) > 5: 
                 sentence = sentence[-5:]
 
