@@ -16,7 +16,7 @@ DELAY = 0.7
 
 def main():
     # Set up variables
-    no_sequences = 5
+    no_sequences = 45
     sequence_length = VIDEO_LENGTH
 
     # Load actions to detect

@@ -13,7 +13,7 @@ import copy
 mp_holistic = mp.solutions.holistic
 mp_drawing = mp.solutions.drawing_utils
 DATA_PATH = os.path.join('model/data') 
-VIDEO_LENGTH = 25                               # Number of frames to save for each action
+VIDEO_LENGTH = 15                               # Number of frames to save for each action
 
 def main():
     # Load actions to detect

@@ -9,13 +9,8 @@ import tensorflow as tf
 from utilities import load_model_lables, extract_keypoints, draw_styled_landmarks, mediapipe_detection, preprocess_landmarks
 from utilities import VIDEO_LENGTH
 
-#TODO: 1: Take out face
-    # Normalization
-    # Rotations
-    # Squeeze
-    # Prespective
-    # Gausian Noise
 #TODO: 2: Only take train data if hands are visisble
+    # Needs to be done in take data
 #TODO: 3: Is possible to train with more weight on the hands?
 #TODO: 4: Training data
 #TODO: 5: Improve recognise logic
@@ -27,6 +22,8 @@ mp_drawing = mp.solutions.drawing_utils
 DATA_PATH = os.path.join('model/data') 
                           # Number of frames to save for each action
 COLORS = [(245,117,16), (117,245,16), (16,117,245), (245,16,117), (16,245,117), (117,16,245), (245,117,16)]
+N_FRAMES_NO_HANDS = 5 # Number of frames to clean if no hands are detected
+N_FRAMES_NO_PREDICT = 15 # Number of frames to clean if no prediction is detected
 
 def main():
     # Configure GPU if available
@@ -77,27 +74,28 @@ def main():
         # keypoints = extract_keypoints(results)
         keypoints = preprocess_landmarks(results)
 
-        #TODO: 2
+        # If hands are detected, append the keypoints to the sequence
         if  results.left_hand_landmarks is not None or results.right_hand_landmarks is not None:
             sequence.append(keypoints)
-            sequence = sequence[-25:]
+            sequence = sequence[-VIDEO_LENGTH:]
             print(f"Sequence length: {len(sequence)}")
             n_frame_without_hands = 0
         else:
             print(f"No hands detected")
             n_frame_without_hands += 1
-            if n_frame_without_hands > 5:
+            if n_frame_without_hands > N_FRAMES_NO_HANDS:
                 sequence = []
                 n_frame_without_hands = 0
                 print(f"Sequence reset due to no hands detected")
-        if len(sequence) == 25:
+        
+        # When sequence is full, make prediction
+        if len(sequence) == VIDEO_LENGTH:
             res = model.predict(np.expand_dims(sequence, axis=0))[0]
             print(actions[np.argmax(res)])
             print(res[np.argmax(res)])
             predictions.append(np.argmax(res))
             
-            
-            #3. Viz logic
+            # If the prediction has higher than the threshold, append it to the sentence
             # if np.unique(predictions[-10:])[0]==np.argmax(res): 
             if res[np.argmax(res)] > threshold:
                 n_frame_without_prediction = 0 
@@ -109,7 +107,7 @@ def main():
                 sequence = []
             else:
                 n_frame_without_prediction += 1
-                if n_frame_without_prediction > 5:
+                if n_frame_without_prediction > N_FRAMES_NO_PREDICT:
                     sequence = []
                     n_frame_without_prediction = 0
                     print(f"Sequence reset due to no prediction")
@@ -121,7 +119,7 @@ def main():
             
         cv2.rectangle(image, (0,0), (640, 40), (245, 117, 16), -1)
         cv2.putText(image, ' '.join(sentence), (3,30), 
-                    cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2, cv2.LINE_AA)
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2, cv2.LINE_AA)
         
         # Show to screen
         cv2.imshow('OpenCV Feed', image)
