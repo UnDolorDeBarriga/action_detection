@@ -342,7 +342,11 @@ def extract_keypots_cordinates(results) -> tuple:
     Returns:
         A tuple containing pose, left hand, and right hand keypoints.
     """
-    pose = np.array([[res.x, res.y, res.z, res.visibility] for res in results.pose_landmarks.landmark]) if results.pose_landmarks else np.zeros((33,4))
+    if results.pose_landmarks:
+        pose = np.array([[res.x, res.y, res.z, res.visibility] for res in results.pose_landmarks.landmark])
+        pose[23:] = np.zeros((10, 4))  
+    else:
+        pose = np.zeros((33, 4))
     # face = np.array([[res.x, res.y, res.z] for res in results.face_landmarks.landmark]).flatten() if results.face_landmarks else np.zeros(468*3)
     lh = np.array([[res.x, res.y, res.z] for res in results.left_hand_landmarks.landmark]) if results.left_hand_landmarks else np.zeros((21,3))
     rh = np.array([[res.x, res.y, res.z] for res in results.right_hand_landmarks.landmark]) if results.right_hand_landmarks else np.zeros((21,3))
