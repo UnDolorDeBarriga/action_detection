@@ -15,7 +15,7 @@ from utilities import VIDEO_LENGTH
 #TODO: 4: Training data
 #TODO: 5: Improve recognise logic
 #TODO: 6: Send sentence to LLM to build a proper phrase
-
+#TODO: 7: Don't consider pose data under the shoulder
 # Define mediapipe model
 mp_holistic = mp.solutions.holistic
 mp_drawing = mp.solutions.drawing_utils
