@@ -15,6 +15,7 @@ from langchain.chains import LLMChain
 from gtts import gTTS
 from langchain_google_genai import ChatGoogleGenerativeAI
 import pygame
+from datetime import datetime
 
 # Define mediapipe model
 mp_holistic = mp.solutions.holistic
@@ -592,7 +593,8 @@ def gloss_list_to_speech(gloss_text_list: List[str], llm: ChatGoogleGenerativeAI
     os.makedirs("sounds", exist_ok=True)
 
     safe_audio_name = gloss_text.replace(' | ', '_').replace('?', '').replace("'", "")
-    audio_name = safe_audio_name + '.mp3'
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    audio_name = f"{safe_audio_name}{timestamp}.mp3"
     audio_path = os.path.join("sounds", audio_name)
 
     natural_audio.save(audio_path)
