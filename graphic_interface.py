@@ -5,8 +5,8 @@ from PIL import Image, ImageTk
 from gesture_engine import GestureEngine
 import time
 from tkinter import messagebox
-import os
 import threading
+from gloss_translator import GlossTranslator
 
 # --- UI and Video Parameters ---
 VIDEO_WIDTH = 960  
@@ -14,10 +14,6 @@ VIDEO_HEIGHT = 540
 WINDOW_WIDTH = VIDEO_WIDTH+50
 WINDOW_HEIGHT = VIDEO_HEIGHT+150
 FRAME_INTERVAL = 5  # in milliseconds
-
-def api_call(sentence):
-    time.sleep(2)
-    print(f"[API] Finished processing: {sentence}")
 
 class App:
     def __init__(self, root):
@@ -47,6 +43,9 @@ class App:
         self.draw_btn = ttk.Button(controls, text="Toggle Drawing", command=self.toggle_drawing)
         self.draw_btn.pack(side=tk.LEFT, padx=5)
 
+        self.api_btn = ttk.Button(controls, text="TBA", command=self.trigger_api_call)
+        self.api_btn.pack(side=tk.LEFT, padx=5)
+
         self.quit_btn = ttk.Button(controls, text="Quit", command=self.quit_app)
         self.quit_btn.pack(side=tk.LEFT, padx=5)
 
@@ -64,6 +63,8 @@ class App:
         self.recognition_active = False
         self.last_sentence = ""
         self.api_thread_running = False
+        self.current_sentence = ""
+        self.translator = GlossTranslator()
 
         # Start video loop
         self.update_video()
@@ -85,16 +86,19 @@ class App:
                     (frame.shape[1] - 120, 30),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
 
-    def maybe_call_api(self, sentence):
-        if sentence != self.last_sentence and sentence.strip():
-            self.last_sentence = sentence
-            if not self.api_thread_running:
-                self.api_thread_running = True
-                threading.Thread(target=self.run_api_call, args=(sentence,), daemon=True).start()
+    def trigger_api_call(self):
+        if self.current_sentence.strip() and not self.api_thread_running:
+            self.api_thread_running = True
+            threading.Thread(target=self.run_api_call, args=(self.current_sentence,), daemon=True).start()
 
     def run_api_call(self, sentence):
-        api_call(sentence)
-        self.api_thread_running = False
+        try:
+            gloss_list = [w.strip() for w in sentence.split('|') if w.strip()]
+            self.translator.translate_and_speak(gloss_list)
+        except Exception as e:
+            print(f"[API] Error: {e}")
+        finally:
+            self.api_thread_running = False
 
     def update_video(self):
         ret, frame = self.cap.read()
@@ -104,7 +108,7 @@ class App:
             if self.recognition_active:
                 frame, sentence = self.engine.process(frame)
                 self.text_label.config(text=sentence)
-                self.maybe_call_api(sentence)
+                self.current_sentence = sentence
             else:
                 sentence = "Recognition is OFF"
                 self.text_label.config(text=sentence)
