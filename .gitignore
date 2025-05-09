@@ -4,3 +4,4 @@ Logs/**
 virtual_env/**
 main.cpython-38.pyc
 .env
+sounds/**

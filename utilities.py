@@ -14,7 +14,7 @@ from langchain.prompts import PromptTemplate
 from langchain.chains import LLMChain 
 from gtts import gTTS
 from langchain_google_genai import ChatGoogleGenerativeAI
-from playsound import playsound
+import pygame
 
 # Define mediapipe model
 mp_holistic = mp.solutions.holistic
@@ -568,46 +568,46 @@ def sequential_arm_rotation(sequences, max_angle_degrees, rotation_probability) 
 
 def gloss_list_to_speech(gloss_text_list: List[str], llm: ChatGoogleGenerativeAI, template_str: str) -> gTTS:
     """
-    Converts a sequence of glosses into natural language text and then into speech.
-
+    Converts a list of glosses to natural language text and generates audio using gTTS.
     Args:
-        gloss_text_list (List[str]): A list of gloss strings.
-        llm (ChatGoogleGenerativeAI): The language model to use to convert glosses to natural language.
-                                         (Updated type hint)
-        template_str (str): The prompt template string to use for the language model.
-                            (Parameter name changed from 'template' to 'template_str' to avoid confusion
-                             with a potentially externally defined 'template' variable and to clarify it's a string)
-
+        gloss_text_list (List[str]): List of glosses to be converted.
+        llm (ChatGoogleGenerativeAI): Language model for text generation.
+        template_str (str): Template string for the prompt.
     Returns:
-        gTTS: The generated gTTS audio object.
+        gTTS: Generated audio object.
     """
     # The prompt is created using the 'template_str' passed as an argument
+    # Prepare prompt and run LLM
     prompt = PromptTemplate(template=template_str, input_variables=["text"])
     llm_chain = LLMChain(prompt=prompt, llm=llm)
-
     gloss_text = ' | '.join(gloss_text_list)
-
-    # The output of invoke with LLMChain is usually a dictionary with a 'text' key
-    # or for some chat models it might be a message object.
-    # For ChatGoogleGenerativeAI used with LLMChain, it should return {'text': 'response...'}
     response = llm_chain.invoke(gloss_text)
     natural_text = response['text']
 
-    language = 'en'
+    # Generate audio with gTTS
+    language = 'it'
     natural_audio = gTTS(text=natural_text, lang=language, slow=False)
 
-    # Create a safer file name, replacing invalid characters if necessary
+    # Safe filename
+    os.makedirs("sounds", exist_ok=True)
+
     safe_audio_name = gloss_text.replace(' | ', '_').replace('?', '').replace("'", "")
     audio_name = safe_audio_name + '.mp3'
+    audio_path = os.path.join("sounds", audio_name)
 
-    natural_audio.save(audio_name)
-    print(f"Audio saved as: {audio_name}") # Added print for confirmation
-    print(f"Generated natural text: {natural_text}") # Added print for debugging
+    natural_audio.save(audio_path)
+    print(f"Audio saved as: {audio_name}")
+    print(f"Generated natural text: {natural_text}")
 
+    # Play with pygame
     try:
-        playsound(audio_name)
+        pygame.mixer.init()
+        pygame.mixer.music.load(audio_path)
+        pygame.mixer.music.play()
+        while pygame.mixer.music.get_busy():
+            time.sleep(0.1)
     except Exception as e:
-        print(f"Errore durante la riproduzione dell'audio con playsound: {e}")
+        print(f"Errore durante la riproduzione dell'audio con pygame: {e}")
 
     return natural_audio
 
