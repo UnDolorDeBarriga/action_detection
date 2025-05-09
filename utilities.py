@@ -121,7 +121,7 @@ def mediapipe_detection(image, model) -> tuple:
         image: The processed image with landmarks drawn.
         results: The detection results containing landmarks.
     """
-    image = cv2.flip(image, 1)
+    # image = cv2.flip(image, 1)
     image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
     image.flags.writeable = False
     results = model.process(image)
