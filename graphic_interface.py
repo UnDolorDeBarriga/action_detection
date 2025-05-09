@@ -6,7 +6,7 @@ from gesture_engine import GestureEngine
 import time
 from tkinter import messagebox
 import os
-
+import threading
 
 # --- UI and Video Parameters ---
 VIDEO_WIDTH = 960  
@@ -14,6 +14,10 @@ VIDEO_HEIGHT = 540
 WINDOW_WIDTH = VIDEO_WIDTH+50
 WINDOW_HEIGHT = VIDEO_HEIGHT+150
 FRAME_INTERVAL = 5  # in milliseconds
+
+def api_call(sentence):
+    time.sleep(2)
+    print(f"[API] Finished processing: {sentence}")
 
 class App:
     def __init__(self, root):
@@ -33,7 +37,6 @@ class App:
         self.video_label = tk.Label(root)
         self.video_label.pack(pady=5)
 
-
         # Control Buttons
         controls = ttk.Frame(root)
         controls.pack(pady=10)
@@ -43,9 +46,6 @@ class App:
 
         self.draw_btn = ttk.Button(controls, text="Toggle Drawing", command=self.toggle_drawing)
         self.draw_btn.pack(side=tk.LEFT, padx=5)
-
-        self.shot_btn = ttk.Button(controls, text="Take Screenshot", command=self.take_screenshot)
-        self.shot_btn.pack(side=tk.LEFT, padx=5)
 
         self.quit_btn = ttk.Button(controls, text="Quit", command=self.quit_app)
         self.quit_btn.pack(side=tk.LEFT, padx=5)
@@ -62,6 +62,8 @@ class App:
 
         self.engine = GestureEngine()
         self.recognition_active = False
+        self.last_sentence = ""
+        self.api_thread_running = False
 
         # Start video loop
         self.update_video()
@@ -71,25 +73,6 @@ class App:
         state = "ON" if self.recognition_active else "OFF"
         print(f"[App] Recognition toggled: {state}")
         self.start_btn.config(text="Stop Recognition" if self.recognition_active else "Start Recognition")
-
-    def take_screenshot(self):
-        ret, frame = self.cap.read()
-        if not ret:
-            print("[WARNING] Screenshot failed: no frame available.")
-            return
-        # Flip the frame to match what the user sees
-        frame = cv2.flip(frame, 1)
-        os.makedirs("screenshots", exist_ok=True)
-        count = 1
-        while True:
-            filename = f"screenshots/screenshot_{count:03d}.jpg"
-            if not os.path.exists(filename):
-                break
-            count += 1
-
-        cv2.imwrite(filename, frame)
-        print(f"[INFO] Screenshot saved as {filename}")
-
 
     def toggle_drawing(self):
         self.engine.toggle_draw()
@@ -102,19 +85,30 @@ class App:
                     (frame.shape[1] - 120, 30),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
 
+    def maybe_call_api(self, sentence):
+        if sentence != self.last_sentence and sentence.strip():
+            self.last_sentence = sentence
+            if not self.api_thread_running:
+                self.api_thread_running = True
+                threading.Thread(target=self.run_api_call, args=(sentence,), daemon=True).start()
+
+    def run_api_call(self, sentence):
+        api_call(sentence)
+        self.api_thread_running = False
+
     def update_video(self):
         ret, frame = self.cap.read()
         if ret:
             frame = cv2.resize(frame, (VIDEO_WIDTH, VIDEO_HEIGHT))
 
-            sentence = "Lorem ipsum dolor sit amet"
             if self.recognition_active:
                 frame, sentence = self.engine.process(frame)
                 self.text_label.config(text=sentence)
+                self.maybe_call_api(sentence)
             else:
+                sentence = "Recognition is OFF"
                 self.text_label.config(text=sentence)
 
-            
             frame = cv2.flip(frame, 1)
             self.update_fps(frame)
             frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
@@ -124,9 +118,6 @@ class App:
             self.video_label.config(image=imgtk)
 
         self.root.after(FRAME_INTERVAL, self.update_video)
-
-
-
 
     def quit_app(self):
         print("[App] Exiting...")
