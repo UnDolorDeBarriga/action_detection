@@ -1,4 +1,6 @@
 model/**
 Logs/**
 .venv/**
+virtual_env/**
 main.cpython-38.pyc
+.env
