@@ -6,37 +6,26 @@ import numpy as np
 import mediapipe as mp
 from tensorflow.keras.models import load_model # type: ignore
 import tensorflow as tf
-from utilities import load_model_lables, extract_keypoints, draw_styled_landmarks, mediapipe_detection, preprocess_landmarks
+from utilities import load_model_lables, extract_keypoints, draw_styled_landmarks, mediapipe_detection, preprocess_landmarks, KEYPOINTS_CONFIG
 from utilities import VIDEO_LENGTH
 
-#TODO: 2: Only take train data if hands are visisble
-    # Needs to be done in take data
-#TODO: 3: Is possible to train with more weight on the hands?
-#TODO: 4: Training data
-#TODO: 5: Improve recognise logic
-#TODO: 6: Send sentence to LLM to build a proper phrase
-#TODO: 7: Don't consider pose data under the shoulder
 # Define mediapipe model
 mp_holistic = mp.solutions.holistic
 mp_drawing = mp.solutions.drawing_utils
 DATA_PATH = os.path.join('model/data') 
-                          # Number of frames to save for each action
 COLORS = [(245,117,16), (117,245,16), (16,117,245), (245,16,117), (16,245,117), (117,16,245), (245,117,16)]
 N_FRAMES_NO_HANDS = 5 # Number of frames to clean if no hands are detected
 N_FRAMES_NO_PREDICT = 15 # Number of frames to clean if no prediction is detected
 
+
 def main():
-    # Configure GPU if available
     config_gpu()
 
-    # Load actions to detect
     actions = load_model_lables()
     print(f"Loaded model labels: {actions}")
 
-    # Load model
     model = load_model('model/save_model.keras')
 
-    # Video capture
     cap = cv2.VideoCapture(0)
     cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1920)
     cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 1080)
@@ -52,51 +41,53 @@ def main():
     threshold = 0.8
     n_frame_without_hands = 0
     n_frame_without_prediction = 0
+
+    expected_len = len(KEYPOINTS_CONFIG["POSE_LANDMARKS_USED"]) * KEYPOINTS_CONFIG["POSE_DIM"] + \
+                   2 * KEYPOINTS_CONFIG["NUM_HAND_LANDMARKS"] * KEYPOINTS_CONFIG["HAND_DIM"]
+    print(f"[INFO] Expected keypoint vector length: {expected_len}")
+
     while True:
-        # ESC (27) to exit teh loop
         key = cv2.waitKey(16)
         if key == 27:
             break
-        
-        # Read frame from camera
+
         ret, frame = cap.read()
         if not ret:
             print("Ignoring empty camera frame.")
             break
-        
-        # Make detections
+
         image, results = mediapipe_detection(frame, mp_holistic_obj)
-        
-        # Draw landmarks
         draw_styled_landmarks(image, results)
 
-        # Extract keypoints
-        # keypoints = extract_keypoints(results)
         keypoints = preprocess_landmarks(results)
 
-        # If hands are detected, append the keypoints to the sequence
-        if  results.left_hand_landmarks is not None or results.right_hand_landmarks is not None:
+        if len(keypoints) != expected_len:
+            print(f"[ERROR] Got keypoint vector of length {len(keypoints)}, expected {expected_len}")
+            continue
+        else:
+            print(f"[INFO] Keypoints OK: {len(keypoints)}")
+
+        if results.left_hand_landmarks is not None or results.right_hand_landmarks is not None:
             sequence.append(keypoints)
             sequence = sequence[-VIDEO_LENGTH:]
-            print(f"Sequence length: {len(sequence)}")
+            print(f"[INFO] Sequence length: {len(sequence)}")
             n_frame_without_hands = 0
         else:
-            print(f"No hands detected")
+            print(f"[WARN] No hands detected")
             n_frame_without_hands += 1
             if n_frame_without_hands > N_FRAMES_NO_HANDS:
                 sequence = []
                 n_frame_without_hands = 0
-                print(f"Sequence reset due to no hands detected")
-        
-        # When sequence is full, make prediction
+                print(f"[INFO] Sequence reset due to no hands detected")
+
         if len(sequence) == VIDEO_LENGTH:
-            res = model.predict(np.expand_dims(sequence, axis=0))[0]
-            print(actions[np.argmax(res)])
-            print(res[np.argmax(res)])
+            input_data = np.expand_dims(sequence, axis=0)
+            print(f"[INFO] Predicting on input shape: {input_data.shape}")
+            res = model.predict(input_data)[0]
+            print(f"[RESULT] {actions[np.argmax(res)]} ({res[np.argmax(res)]:.2f})")
+
             predictions.append(np.argmax(res))
-            
-            # If the prediction has higher than the threshold, append it to the sentence
-            # if np.unique(predictions[-10:])[0]==np.argmax(res): 
+
             if res[np.argmax(res)] > threshold:
                 n_frame_without_prediction = 0 
                 if len(sentence) > 0: 
@@ -110,59 +101,50 @@ def main():
                 if n_frame_without_prediction > N_FRAMES_NO_PREDICT:
                     sequence = []
                     n_frame_without_prediction = 0
-                    print(f"Sequence reset due to no prediction")
+                    print(f"[INFO] Sequence reset due to no prediction")
+
             if len(sentence) > 5: 
                 sentence = sentence[-5:]
 
-            # Viz probabilities
             image = prob_viz(res, actions, image)
-            
+
+            if key == ord('s'):
+                np.save("debug_sequence.npy", np.array(sequence))
+                print("[DEBUG] Saved sequence to debug_sequence.npy")
+
         cv2.rectangle(image, (0,0), (640, 40), (245, 117, 16), -1)
         cv2.putText(image, ' '.join(sentence), (3,30), 
                     cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2, cv2.LINE_AA)
-        
-        # Show to screen
+
         cv2.imshow('OpenCV Feed', image)
 
     cap.release()
     cv2.destroyAllWindows()
 
+
 def prob_viz(res, actions, input_frame) -> np.ndarray:
-    """
-    Visualizes the probabilities of the actions.
-    Args:
-        res: The prediction results.
-        actions: The list of actions.
-        input_frame: The input frame to draw on.
-    Returns:
-        output_frame: The processed frame with probabilities drawn.
-    """
     output_frame = input_frame.copy()
     for num, prob in enumerate(res):
         cv2.rectangle(output_frame, (0,60+num*40), (int(prob*100), 90+num*40), COLORS[num], -1)
         cv2.putText(output_frame, actions[num], (0, 85+num*40), cv2.FONT_HERSHEY_SIMPLEX, 1, (255,255,255), 2, cv2.LINE_AA)
-        
     return output_frame
-    
+
+
 def config_gpu():
-    # --- INIZIO CODICE CONFIGURAZIONE GPU ---
     gpus = tf.config.list_physical_devices('GPU')
     if gpus:
         print(f"Trovate {len(gpus)} GPU fisiche.")
         try:
-            # Itera su ogni GPU fisica trovata
-            for gpu in gpus:  # <--- Qui viene definita la variabile 'gpu'
-                # Imposta la crescita della memoria per QUESTA specifica gpu
+            for gpu in gpus:
                 tf.config.experimental.set_memory_growth(gpu, True)
-                print(f"  - Memoria dinamica abilitata per: {gpu.name}") # Stampa info utile
+                print(f"  - Memoria dinamica abilitata per: {gpu.name}")
             logical_gpus = tf.config.list_logical_devices('GPU')
             print(f"Configurate {len(logical_gpus)} GPU logiche.")
         except RuntimeError as e:
-            # La crescita della memoria deve essere impostata prima dell'inizializzazione!
             print(f"Errore durante la configurazione della GPU: {e}")
     else:
         print("Nessuna GPU fisica trovata da TensorFlow.")
-    # --- FINE CODICE CONFIGURAZIONE GPU --
+
 
 if __name__ == '__main__':
     main()

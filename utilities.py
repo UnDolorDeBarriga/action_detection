@@ -9,11 +9,32 @@ import mediapipe as mp
 import csv
 import math
 import copy
+from typing import List, Any 
+from langchain.prompts import PromptTemplate 
+from langchain.chains import LLMChain 
+from gtts import gTTS
+from langchain_google_genai import ChatGoogleGenerativeAI
+import pygame
+from datetime import datetime
+
+# --- Keypoint Configuration ---
+KEYPOINTS_CONFIG = {
+    "POSE_LANDMARKS_USED": list(range(23)),
+    "POSE_LANDMARK_NAMES": {
+        "nose": 0,
+        "left_shoulder": 11,
+        "right_shoulder": 12,
+    },
+    "NUM_HAND_LANDMARKS": 21,
+    "POSE_DIM": 3,  # x, y, z, visibility
+    "HAND_DIM": 3   # x, y, z
+}
+
 # Define mediapipe model
 mp_holistic = mp.solutions.holistic
 mp_drawing = mp.solutions.drawing_utils
 DATA_PATH = os.path.join('model/data') 
-VIDEO_LENGTH = 25                               # Number of frames to save for each action
+VIDEO_LENGTH = 15                               # Number of frames to save for each action
 
 def main():
     # Load actions to detect
@@ -114,7 +135,7 @@ def mediapipe_detection(image, model) -> tuple:
         image: The processed image with landmarks drawn.
         results: The detection results containing landmarks.
     """
-    image = cv2.flip(image, 1)
+    # image = cv2.flip(image, 1)
     image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
     image.flags.writeable = False
     results = model.process(image)
@@ -174,72 +195,7 @@ def draw_styled_landmarks(image, results) -> None:
                              mp_drawing.DrawingSpec(color=(245,117,66), thickness=2, circle_radius=3), 
                              mp_drawing.DrawingSpec(color=(245,66,230), thickness=2, circle_radius=1)
                              )
-#-----------------------
-def apply_spatial_augmentations(results, angle_deg, squeeze_w1, squeeze_w2):
-    """
-        Apply rotation and squeeze to MediaPipe landmarks.
 
-        Args:
-            results: The output of the MediaPipe Holistic model.
-            angle_deg: The rotation angle in degrees (randomly generated per instance).
-            squeeze_w1: Left squeeze proportion (randomly generated per instance).
-            squeeze_w2: Right squeeze proportion (randomly generated per instance).
-
-        Returns:
-            A concatenated NumPy array of augmented landmarks [pose, lh, rh].
-        """
-    angle_rad = math.radians(angle_deg)
-    W = 1.0 # Larghezza normalizzata del frame
-
-    augmented_pose = []
-    augmented_lh = []
-    augmented_rh = []
-
-    # Processa Pose Landmarks
-    if results.pose_landmarks:
-        for lm in results.pose_landmarks.landmark:
-            x, y = lm.x, lm.y
-            # 1. Applica Rotazione
-            x_rot, y_rot = rotate_point(x, y, angle_rad)
-            # 2. Applica Squeeze alla coordinata x ruotata
-            x_sq = squeeze_point_x(x_rot, squeeze_w1, squeeze_w2, W)
-            # Conserva y ruotata, z e visibilità originali
-            augmented_pose.extend([x_sq, y_rot, lm.z, lm.visibility])
-    else:
-        augmented_pose = np.zeros(33 * 4)
-
-    # Processa Left Hand Landmarks
-    if results.left_hand_landmarks:
-        for lm in results.left_hand_landmarks.landmark:
-            x, y = lm.x, lm.y
-            # 1. Applica Rotazione
-            x_rot, y_rot = rotate_point(x, y, angle_rad)
-            # 2. Applica Squeeze
-            x_sq = squeeze_point_x(x_rot, squeeze_w1, squeeze_w2, W)
-            augmented_lh.extend([x_sq, y_rot, lm.z])
-    else:
-        augmented_lh = np.zeros(21 * 3)
-
-    # Processa Right Hand Landmarks
-    if results.right_hand_landmarks:
-        for lm in results.right_hand_landmarks.landmark:
-            x, y = lm.x, lm.y
-            # 1. Applica Rotazione
-            x_rot, y_rot = rotate_point(x, y, angle_rad)
-            # 2. Applica Squeeze
-            x_sq = squeeze_point_x(x_rot, squeeze_w1, squeeze_w2, W)
-            augmented_rh.extend([x_sq, y_rot, lm.z])
-    else:
-        augmented_rh = np.zeros(21 * 3)
-
-    # Concatena i risultati (assicurandoti che siano array numpy)
-    pose_arr = np.array(augmented_pose).flatten()
-    lh_arr = np.array(augmented_lh).flatten()
-    rh_arr = np.array(augmented_rh).flatten()
-
-    return np.concatenate([pose_arr, lh_arr, rh_arr])
-
-# --- Esempio di utilizzo nel tuo ciclo di processing ---
 def squeeze_data(sequences, max_squeeze_proportion) -> np.ndarray:
     """
     Applies squeeze to the x-coordinates of the sequences based on the specified proportion.
@@ -274,38 +230,41 @@ def rotate_data(sequences, rotations) -> np.ndarray:
         rotations: A list of angles in degrees for rotation.
     Returns:
         A numpy array containing the rotated sequences."""
-    pose_length = 99
-    hand_length = 63
+    num_pose = len(KEYPOINTS_CONFIG["POSE_LANDMARKS_USED"])
+    pose_dim = 3  # ignore visibility
+    hand_len = KEYPOINTS_CONFIG["NUM_HAND_LANDMARKS"] * KEYPOINTS_CONFIG["HAND_DIM"]
 
-    hand_l_start = pose_length
-    hand_l_end = pose_length + hand_length
-    hand_r_start = pose_length + hand_length
-    hand_r_end = pose_length + 2 * hand_length
-
-    _, n_frames, _ = sequences.shape
+    pose_end = num_pose * pose_dim
+    hand_l_start = pose_end
+    hand_l_end = hand_l_start + hand_len
+    hand_r_start = hand_l_end
+    hand_r_end = hand_r_start + hand_len
 
     rotated_sequences = np.copy(sequences)
-    
-    for i, rot in enumerate(rotations):
-        cos_theta = np.cos(np.radians(rot))
-        sin_theta = np.sin(np.radians(rot))
+    _, n_frames, _ = sequences.shape
+
+    for i, angle in enumerate(rotations):
+        theta = np.radians(angle)
+        cos_theta = np.cos(theta)
+        sin_theta = np.sin(theta)
         rotation_matrix = np.array([[cos_theta, -sin_theta],
-                                  [sin_theta, cos_theta]])
-        
+                                    [sin_theta, cos_theta]])
+
         for frame_idx in range(n_frames):
-            # Extract x, y coordinates for left and right hands
-            hand_l = sequences[i, frame_idx, hand_l_start:hand_l_end].reshape(21, 3)[:, :2]
-            hand_r = sequences[i, frame_idx, hand_r_start:hand_r_end].reshape(21, 3)[:, :2]
+            # Extract x, y for left hand
+            hand_l = sequences[i, frame_idx, hand_l_start:hand_l_end].reshape(-1, 3)[:, :2]
+            hand_r = sequences[i, frame_idx, hand_r_start:hand_r_end].reshape(-1, 3)[:, :2]
 
-            # Rotate left hand
-            rotated_hand_l = np.dot(hand_l, rotation_matrix)
-            rotated_sequences[i, frame_idx, hand_l_start:hand_l_end-1:3] = rotated_hand_l[:, 0]
-            rotated_sequences[i, frame_idx, hand_l_start+1:hand_l_end:3] = rotated_hand_l[:, 1]
+            rotated_l = np.dot(hand_l, rotation_matrix)
+            rotated_r = np.dot(hand_r, rotation_matrix)
 
-            # Rotate right hand
-            rotated_hand_r = np.dot(hand_r, rotation_matrix)
-            rotated_sequences[i, frame_idx, hand_r_start:hand_r_end-1:3] = rotated_hand_r[:, 0]
-            rotated_sequences[i, frame_idx, hand_r_start+1:hand_r_end:3] = rotated_hand_r[:, 1]
+            # Update only x, y (not z)
+            for j in range(KEYPOINTS_CONFIG["NUM_HAND_LANDMARKS"]):
+                rotated_sequences[i, frame_idx, hand_l_start + j * 3] = rotated_l[j, 0]
+                rotated_sequences[i, frame_idx, hand_l_start + j * 3 + 1] = rotated_l[j, 1]
+
+                rotated_sequences[i, frame_idx, hand_r_start + j * 3] = rotated_r[j, 0]
+                rotated_sequences[i, frame_idx, hand_r_start + j * 3 + 1] = rotated_r[j, 1]
 
     return rotated_sequences
 
@@ -365,25 +324,26 @@ def normalize_pose_coordinates(kp_pose) -> np.ndarray:
     Returns:
         A numpy array containing the normalized coordinates of the pose keypoints.
     """
-    shoulder_distance = calculate_distance(kp_pose[11], kp_pose[12])
-    temp_pose = kp_pose[:, :-1]
-    # Convert to relative coordinates
-    base = (0, 0, 0)
-    for i in range(33):
-        if i == 0:
-            base = (temp_pose[i][0], temp_pose[i][1], temp_pose[i][2])
-        temp_pose[i] = temp_pose[i] - base
+    left_idx = KEYPOINTS_CONFIG["POSE_LANDMARK_NAMES"]["left_shoulder"]
+    right_idx = KEYPOINTS_CONFIG["POSE_LANDMARK_NAMES"]["right_shoulder"]
+    shoulder_distance = calculate_distance(kp_pose[left_idx], kp_pose[right_idx])
 
-    # Convert to a one-dimensional list
+    temp_pose = kp_pose.copy()
+    
+    nose_idx = KEYPOINTS_CONFIG["POSE_LANDMARK_NAMES"]["nose"]
+    base = temp_pose[nose_idx]
+
+    # Translate all points to be relative to the nose
+    temp_pose = temp_pose - base
+
+    # Flatten
     temp_pose = temp_pose.flatten()
-
-    # Normalization
+    
+    # Normalize
     def normalize_(n):
         return n / shoulder_distance if shoulder_distance != 0 else n
 
-    temp_pose = list(map(normalize_, temp_pose))
-
-    return np.array(temp_pose)
+    return np.array(list(map(normalize_, temp_pose)))
 
 def calculate_distance(landmark1, landmark2) -> float:
     """
@@ -394,7 +354,6 @@ def calculate_distance(landmark1, landmark2) -> float:
     Returns:
         The Euclidean distance between the two landmarks.
     """
-    visibility_th = 0.3
     return math.sqrt((landmark1[0] - landmark2[0])**2 +
                      (landmark1[1] - landmark2[1])**2 +
                      (landmark1[2] - landmark2[2])**2)
@@ -407,11 +366,17 @@ def extract_keypots_cordinates(results) -> tuple:
     Returns:
         A tuple containing pose, left hand, and right hand keypoints.
     """
-    pose = np.array([[res.x, res.y, res.z, res.visibility] for res in results.pose_landmarks.landmark]) if results.pose_landmarks else np.zeros((33,4))
-    # face = np.array([[res.x, res.y, res.z] for res in results.face_landmarks.landmark]).flatten() if results.face_landmarks else np.zeros(468*3)
-    lh = np.array([[res.x, res.y, res.z] for res in results.left_hand_landmarks.landmark]) if results.left_hand_landmarks else np.zeros((21,3))
-    rh = np.array([[res.x, res.y, res.z] for res in results.right_hand_landmarks.landmark]) if results.right_hand_landmarks else np.zeros((21,3))
-    return (pose, np.array([lh, rh]))
+    pose_landmarks = results.pose_landmarks.landmark if results.pose_landmarks else []
+    selected_pose = np.array([
+        [pose_landmarks[i].x, pose_landmarks[i].y, pose_landmarks[i].z]
+        if i < len(pose_landmarks) else [0.0, 0.0, 0.0]
+        for i in KEYPOINTS_CONFIG["POSE_LANDMARKS_USED"]
+    ])
+
+    left_hand = np.array([[res.x, res.y, res.z] for res in results.left_hand_landmarks.landmark]) if results.left_hand_landmarks else np.zeros((KEYPOINTS_CONFIG["NUM_HAND_LANDMARKS"], 3))
+    right_hand = np.array([[res.x, res.y, res.z] for res in results.right_hand_landmarks.landmark]) if results.right_hand_landmarks else np.zeros((KEYPOINTS_CONFIG["NUM_HAND_LANDMARKS"], 3))
+
+    return (selected_pose, np.array([left_hand, right_hand]))
 
 def extract_keypoints(results) -> np.ndarray:
     """
@@ -421,12 +386,16 @@ def extract_keypoints(results) -> np.ndarray:
     Returns:
         A flattened array of keypoints.
     """
-    pose = np.array([[res.x, res.y, res.z, res.visibility] for res in results.pose_landmarks.landmark]).flatten() if results.pose_landmarks else np.zeros(33*4)
-    # face = np.array([[res.x, res.y, res.z] for res in results.face_landmarks.landmark]).flatten() if results.face_landmarks else np.zeros(468*3)
-    lh = np.array([[res.x, res.y, res.z] for res in results.left_hand_landmarks.landmark]).flatten() if results.left_hand_landmarks else np.zeros(21*3)
-    rh = np.array([[res.x, res.y, res.z] for res in results.right_hand_landmarks.landmark]).flatten() if results.right_hand_landmarks else np.zeros(21*3)
+    pose_landmarks = results.pose_landmarks.landmark if results.pose_landmarks else []
+    pose = np.array([
+        [pose_landmarks[i].x, pose_landmarks[i].y, pose_landmarks[i].z]
+        if i < len(pose_landmarks) else [0.0, 0.0, 0.0]
+        for i in KEYPOINTS_CONFIG["POSE_LANDMARKS_USED"]
+    ]).flatten()
+    lh = np.array([[res.x, res.y, res.z] for res in results.left_hand_landmarks.landmark]) if results.left_hand_landmarks else np.zeros(KEYPOINTS_CONFIG["NUM_HAND_LANDMARKS"]*3)
+    rh = np.array([[res.x, res.y, res.z] for res in results.right_hand_landmarks.landmark]) if results.right_hand_landmarks else np.zeros(KEYPOINTS_CONFIG["NUM_HAND_LANDMARKS"]*3)
     #return np.concatenate([pose, face, lh, rh])
-    return np.concatenate([pose,lh, rh])
+    return np.concatenate([pose, lh.flatten(), rh.flatten()])
 
 def select_num(key, number) -> tuple:
     """
@@ -462,30 +431,106 @@ def draw_info(image, action, sequence) -> np.ndarray:
                                cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 1, cv2.LINE_AA)
     return image
 
-def get_last_directory(actions) -> int:
-        """
-        Gets the last non-empty directory for each action.
-        Creates directories for each action if they don't exist.
-        Args:
-            actions: List of action names.
-        Returns:
-            last_dir: Dictionary with action names as keys and last non-empty directory as values.
-        """
-        for action in actions: 
-            os.makedirs(os.path.join(DATA_PATH, action), exist_ok=True)
+def mirror_pose_sequence(sequences) -> np.ndarray:
+    """
+    Mirrors the pose sequence by swapping left and right landmarks.
+    Args:
+        sequences: A numpy array containing the sequences of keypoints.
+    Returns:
+        A numpy array containing the mirrored sequences.
+    """
+
+    n, num_frames, _ = sequences.shape
+    mirrored_sequences = np.copy(sequences)
+
+    # Pose landmark pairs to swap
+    pose_pairs = [
+        (11, 12),  # shoulders
+        (13, 14),  # elbows
+        (15, 16),  # wrists
+        (17, 18),  # pinkies
+        (19, 20),  # index
+        (21, 22),  # thumbs
+        (7, 8)     # ears
+    ]
+
+    pose_indices = KEYPOINTS_CONFIG["POSE_LANDMARKS_USED"]
+    pose_dim = 3  # Skip visibility in augmentation
+    num_pose = len(pose_indices)
+    hand_len = KEYPOINTS_CONFIG["NUM_HAND_LANDMARKS"] * KEYPOINTS_CONFIG["HAND_DIM"]
+
+    # Compute dynamic index ranges
+    pose_end = num_pose * pose_dim
+    lh_start = pose_end
+    lh_end = lh_start + hand_len
+    rh_start = lh_end
+    rh_end = rh_start + hand_len
+
+    for i in range(n):
+        for frame_idx in range(num_frames):
+            # Mirror pose
+            for left_raw, right_raw in pose_pairs:
+                if left_raw not in pose_indices or right_raw not in pose_indices:
+                    continue  # skip unused landmarks
+
+                left = pose_indices.index(left_raw)
+                right = pose_indices.index(right_raw)
+
+                left_start = left * pose_dim
+                right_start = right * pose_dim
+
+                # Swap
+                mirrored_sequences[i, frame_idx, left_start:left_start+pose_dim], \
+                mirrored_sequences[i, frame_idx, right_start:right_start+pose_dim] = \
+                    mirrored_sequences[i, frame_idx, right_start:right_start+pose_dim].copy(), \
+                    mirrored_sequences[i, frame_idx, left_start:left_start+pose_dim].copy()
+
+                # Flip x-coordinates
+                mirrored_sequences[i, frame_idx, left_start] *= -1
+                mirrored_sequences[i, frame_idx, right_start] *= -1
+
+            # Mirror hands
+            mirrored_sequences[i, frame_idx, lh_start:lh_end], \
+            mirrored_sequences[i, frame_idx, rh_start:rh_end] = \
+                sequences[i, frame_idx, rh_start:rh_end].copy(), \
+                sequences[i, frame_idx, lh_start:lh_end].copy()
+
+            # Flip x for both hands
+            for j in range(KEYPOINTS_CONFIG["NUM_HAND_LANDMARKS"]):
+                mirrored_sequences[i, frame_idx, lh_start + j * 3] *= -1
+                mirrored_sequences[i, frame_idx, rh_start + j * 3] *= -1
+
+    return mirrored_sequences
+
+
+def get_last_directory(actions) -> dict:
+    """
+    Gets the directory with the highest numerical name for each action.
+    Creates directories for each action if they don't exist.
+    
+    Args:
+        actions: List of action names.
+    
+    Returns:
+        last_dir: Dictionary with action names as keys and the highest numbered directory as values,
+                  or -1 if no directories with numeric names exist.
+    """
+    last_dir = {}
+    
+    for action in actions: 
+        action_path = os.path.join(DATA_PATH, action)
+        os.makedirs(action_path, exist_ok=True)
+
+        max_numeric_folder = -1
+        for folder in os.listdir(action_path):
+            folder_path = os.path.join(action_path, folder)
+            if os.path.isdir(folder_path) and folder.isdigit():
+                if os.listdir(folder_path):  # ensure it's not empty
+                    max_numeric_folder = max(max_numeric_folder, int(folder))
         
-        last_dir = {}
-        for action in actions:
-            last_non_empty_dir = None
-            for folder in sorted(os.listdir(os.path.join(DATA_PATH, action)), reverse=True):
-                folder_path = os.path.join(DATA_PATH, action, folder)
-                if os.path.isdir(folder_path) and os.listdir(folder_path):
-                    last_non_empty_dir = folder
-                    last_dir[action] = int(folder)
-                    break
-            if last_non_empty_dir is None:
-                last_dir[action] = -1
-        return last_dir
+        last_dir[action] = max_numeric_folder
+
+    return last_dir
 
 def preprocess_landmarks(results) -> np.ndarray:
     """
@@ -496,9 +541,8 @@ def preprocess_landmarks(results) -> np.ndarray:
         A concatenated numpy array of normalized pose and hand coordinates.
     """
     kp_pose, kp_hands = extract_keypots_cordinates(results)
-    norm_hands = normalize_hands_coordinates(kp_hands)
     norm_pose = normalize_pose_coordinates(kp_pose)
-    # print(f"Pose shape: {norm_pose.shape}, Hands shape: {norm_hands.shape}")
+    norm_hands = normalize_hands_coordinates(kp_hands)
     return np.concatenate([norm_pose, norm_hands])
 
 def sequential_arm_rotation(sequences, max_angle_degrees, rotation_probability) -> np.ndarray:
@@ -515,43 +559,91 @@ def sequential_arm_rotation(sequences, max_angle_degrees, rotation_probability) 
     n, num_frames, _ = sequences.shape
     rotated_sequences = np.copy(sequences)
 
-    arm_joints = [11, 12, 13, 14, 15, 16] # Indices for left and right shoulders, elbows, and wrists
+    arm_joints = [11, 12, 13, 14, 15, 16]  # shoulders, elbows, wrists
+    pose_indices = KEYPOINTS_CONFIG["POSE_LANDMARKS_USED"]
+    pose_dim = 3
+    num_pose = len(pose_indices)
 
     for i in range(n):
         for frame_idx in range(num_frames):
-            prev_coords = None  # Store coordinates of the "previous" joint
+            prev_coords = None
 
-            for joint_idx in arm_joints:
-                start_idx = joint_idx * 3
-                end_idx = start_idx + 3
+            for joint in arm_joints:
+                if joint not in pose_indices:
+                    continue
 
-                rotated_coords = sequences[i, frame_idx, start_idx:end_idx].copy() # Define it here
+                index = pose_indices.index(joint)
+                start = index * pose_dim
+
+                rotated_coords = sequences[i, frame_idx, start:start+pose_dim].copy()
 
                 if np.random.rand() < rotation_probability:
                     theta = np.radians(np.random.uniform(-max_angle_degrees, max_angle_degrees))
-                    cos_theta = np.cos(theta)
-                    sin_theta = np.sin(theta)
-                    rotation_matrix = np.array([[cos_theta, -sin_theta],
-                                              [sin_theta, cos_theta]])
+                    rot_matrix = np.array([[np.cos(theta), -np.sin(theta)],
+                                           [np.sin(theta),  np.cos(theta)]])
 
-                    joint_coords = sequences[i, frame_idx, start_idx:end_idx]  # Extract x, y, z
+                    joint_coords = sequences[i, frame_idx, start:start+pose_dim]
 
-                    # Rotate relative to the previous joint (if available)
                     if prev_coords is not None:
-                        offset = joint_coords[:2] - prev_coords[:2]  # Offset of x, y
-                        rotated_offset = np.dot(offset, rotation_matrix)
+                        offset = joint_coords[:2] - prev_coords[:2]
+                        rotated_offset = np.dot(offset, rot_matrix)
                         rotated_coords[:2] = prev_coords[:2] + rotated_offset
                     else:
-                        rotated_coords[:2] = np.dot(joint_coords[:2], rotation_matrix)
+                        rotated_coords[:2] = np.dot(joint_coords[:2], rot_matrix)
 
-                    rotated_sequences[i, frame_idx, start_idx:start_idx + 2] = rotated_coords[:2]  # Update x, y
+                    rotated_sequences[i, frame_idx, start:start+2] = rotated_coords[:2]
 
-                # Update prev_coords for the next joint
-                
-                prev_coords = sequences[i, frame_idx, start_idx:end_idx].copy()
+                prev_coords = sequences[i, frame_idx, start:start+pose_dim].copy()
 
     return rotated_sequences
 
+
+
+def gloss_list_to_speech(gloss_text_list: List[str], llm: ChatGoogleGenerativeAI, template_str: str) -> gTTS:
+    """
+    Converts a list of glosses to natural language text and generates audio using gTTS.
+    Args:
+        gloss_text_list (List[str]): List of glosses to be converted.
+        llm (ChatGoogleGenerativeAI): Language model for text generation.
+        template_str (str): Template string for the prompt.
+    Returns:
+        gTTS: Generated audio object.
+    """
+    # The prompt is created using the 'template_str' passed as an argument
+    # Prepare prompt and run LLM
+    prompt = PromptTemplate(template=template_str, input_variables=["text"])
+    llm_chain = LLMChain(prompt=prompt, llm=llm)
+    gloss_text = ' | '.join(gloss_text_list)
+    response = llm_chain.invoke(gloss_text)
+    natural_text = response['text']
+
+    # Generate audio with gTTS
+    language = 'it'
+    natural_audio = gTTS(text=natural_text, lang=language, slow=False)
+
+    # Safe filename
+    os.makedirs("sounds", exist_ok=True)
+
+    safe_audio_name = gloss_text.replace(' | ', '_').replace('?', '').replace("'", "")
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    audio_name = f"{safe_audio_name}{timestamp}.mp3"
+    audio_path = os.path.join("sounds", audio_name)
+
+    natural_audio.save(audio_path)
+    print(f"Audio saved as: {audio_name}")
+    print(f"Generated natural text: {natural_text}")
+
+    # Play with pygame
+    try:
+        pygame.mixer.init()
+        pygame.mixer.music.load(audio_path)
+        pygame.mixer.music.play()
+        while pygame.mixer.music.get_busy():
+            time.sleep(0.1)
+    except Exception as e:
+        print(f"Errore durante la riproduzione dell'audio con pygame: {e}")
+
+    return natural_audio
 
 if __name__ == '__main__':
     main()

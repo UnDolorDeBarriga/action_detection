@@ -49,7 +49,7 @@ def main():
     # Whait untill space is pressed to start collection
     while cv2.waitKey(30) != 32:
         ret, image_i = cap.read()
-        image_i = cv2.flip(image_i, 1)
+        # image_i = cv2.flip(image_i, 1)
         cv2.putText(image_i, 'Press SPACE to start collection', (120,200), 
             cv2.FONT_HERSHEY_SIMPLEX, 1, (0,0, 0), 4, cv2.LINE_AA)
         cv2.imshow('OpenCV Feed', image_i)
